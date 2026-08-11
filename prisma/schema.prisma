@@ -1,0 +1,282 @@
+// Prisma Schema — Instituto Dok Su Ri
+// SQLite database for local development
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ─── Aluno ───────────────────────────────────────────────
+
+model Student {
+  id        String   @id @default(cuid())
+  name      String
+  gender    String   // MASCULINO, FEMININO
+  birthDate DateTime
+  phone     String   @default("")
+  email     String   @default("")
+
+  // Responsável (menor de idade)
+  guardianName  String @default("")
+  guardianPhone String @default("")
+  fatherName    String @default("")
+  motherName    String @default("")
+
+  // Ficha Médica
+  hasPhysicalLimitation  Boolean @default(false)
+  physicalLimitationDesc String  @default("")
+  hasDisease             Boolean @default(false)
+  diseaseDesc            String  @default("")
+  hasAllergies           Boolean @default(false)
+  allergiesDesc          String  @default("")
+  usesMedication         Boolean @default(false)
+  medicationDesc         String  @default("")
+  medicalNotes           String  @default("")
+
+  // Academia
+  beltRank       String   // BRANCA, AMARELA, LARANJA, VERDE, AZUL, VERMELHA, MARROM, PRETA_1DAN...
+  lastGraduation DateTime?
+  enrollmentDate DateTime @default(now())
+  status         String   @default("ATIVO") // ATIVO, INATIVO, TRANCADO
+
+  // Financeiro
+  paymentType       String @default("MENSALIDADE") // MENSALIDADE, GYMPASS
+  monthlyFee        Float  @default(0)
+  dueDay            Int    @default(10)
+  gympassCheckinValue Float @default(0)
+
+  notes     String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  schedules    StudentSchedule[]
+  payments     Payment[]
+  checkins     GympassCheckin[]
+  attendances  Attendance[]
+  graduations  GraduationHistory[]
+  participations EventParticipant[]
+
+  @@index([status])
+  @@index([beltRank])
+  @@index([paymentType])
+  @@index([name])
+}
+
+// ─── Horários ────────────────────────────────────────────
+
+model Schedule {
+  id          String @id @default(cuid())
+  dayOfWeek   String // SEGUNDA, TERCA, QUARTA, QUINTA, SEXTA, SABADO
+  time        String // "19:00", "20:00"
+  maxCapacity Int    @default(30)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  students    StudentSchedule[]
+  attendances Attendance[]
+
+  @@unique([dayOfWeek, time])
+}
+
+model StudentSchedule {
+  id         String @id @default(cuid())
+  studentId  String
+  scheduleId String
+
+  student  Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, scheduleId])
+}
+
+// ─── Financeiro ──────────────────────────────────────────
+
+model Payment {
+  id        String   @id @default(cuid())
+  studentId String
+  month     Int      // 1-12
+  year      Int
+  amount    Float
+  dueDate   DateTime
+  paidAt    DateTime?
+  status    String   @default("PENDENTE") // PAGO, PENDENTE, ATRASADO
+  notes     String   @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, month, year])
+  @@index([status])
+  @@index([month, year])
+}
+
+model GympassCheckin {
+  id        String   @id @default(cuid())
+  studentId String
+  date      DateTime
+  value     Float
+
+  createdAt DateTime @default(now())
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, date])
+}
+
+// ─── Frequência ──────────────────────────────────────────
+
+model Attendance {
+  id         String   @id @default(cuid())
+  studentId  String
+  scheduleId String
+  date       DateTime
+  present    Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+
+  student  Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, scheduleId, date])
+  @@index([date])
+}
+
+// ─── Graduações ──────────────────────────────────────────
+
+model GraduationHistory {
+  id        String   @id @default(cuid())
+  studentId String
+  fromBelt  String
+  toBelt    String
+  date      DateTime
+  notes     String   @default("")
+
+  createdAt DateTime @default(now())
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+}
+
+// ─── Campeonatos ─────────────────────────────────────────
+
+model Event {
+  id               String   @id @default(cuid())
+  name             String
+  date             DateTime
+  location         String   @default("")
+  organization     String   @default("")
+  registrationFee  Float    @default(0)
+  notes            String   @default("")
+  status           String   @default("PLANEJAMENTO") // PLANEJAMENTO, INSCRICOES, EM_ANDAMENTO, FINALIZADO
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  modalities Modality[]
+}
+
+model Modality {
+  id      String @id @default(cuid())
+  eventId String
+  name    String
+  type    String // COMBATE, MEDICAO, PONTUACAO
+
+  event      Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  categories Category[]
+}
+
+model Category {
+  id         String  @id @default(cuid())
+  modalityId String
+  name       String
+  beltRange  String  @default("") // "BRANCA-AMARELA", "VERDE-AZUL", etc.
+  gender     String  @default("") // MASCULINO, FEMININO, MISTO
+  minAge     Int     @default(0)
+  maxAge     Int     @default(99)
+  minWeight  Float   @default(0)
+  maxWeight  Float   @default(999)
+
+  modality     Modality           @relation(fields: [modalityId], references: [id], onDelete: Cascade)
+  participants EventParticipant[]
+  matches      BracketMatch[]
+}
+
+model EventParticipant {
+  id               String    @id @default(cuid())
+  categoryId       String
+  studentId        String
+  paidRegistration Boolean   @default(false)
+  amountPaid       Float     @default(0)
+  paymentDate      DateTime?
+  weight           Float?
+  notes            String    @default("")
+  placement        Int?
+  medal            String?   // OURO, PRATA, BRONZE
+  metric           Float?    // Para medição (metros, etc.)
+  score            Float?    // Para pontuação (nota)
+
+  createdAt DateTime @default(now())
+
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  student  Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, studentId])
+}
+
+model BracketMatch {
+  id         String  @id @default(cuid())
+  categoryId String
+  round      Int     // 1 = primeira fase, 2 = quartas, 3 = semis, 4 = final
+  position   Int     // Posição no round
+  athlete1Id String?
+  athlete2Id String?
+  winnerId   String?
+  score      String  @default("")
+  isBye      Boolean @default(false)
+  isThirdPlace Boolean @default(false)
+  nextMatchId String?
+  notes      String  @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId, round])
+}
+
+// ─── Configurações ───────────────────────────────────────
+
+model Settings {
+  id                    String @id @default("default")
+  academyName           String @default("Instituto Dok Su Ri - Unidade 3")
+  defaultMonthlyFee     Float  @default(150)
+  defaultGympassValue   Float  @default(8)
+  defaultDueDay         Int    @default(10)
+
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Audit Log ───────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  action      String   // CREATE, UPDATE, DELETE
+  entity      String   // Student, Payment, etc.
+  entityId    String
+  description String   @default("")
+  changes     String   @default("") // JSON string
+  createdAt   DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
