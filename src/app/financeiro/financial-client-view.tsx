@@ -89,43 +89,43 @@ export function FinancialClientView({
     <div className="space-y-6">
       {/* Top Metrics Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-slate-900/90 p-5 rounded-2xl border border-slate-800/80 shadow-lg backdrop-blur-md">
-          <span className="text-xs font-bold uppercase text-slate-400">
+        <div className="bg-white dark:bg-slate-900/90 p-5 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-md backdrop-blur-md transition-colors">
+          <span className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400">
             Mensalidades Recebidas ({month}/{year})
           </span>
-          <div className="text-2xl font-black text-emerald-400 mt-1">
+          <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
             {formatCurrency(totalPaidRevenue)}
           </div>
         </div>
 
-        <div className="bg-slate-900/90 p-5 rounded-2xl border border-slate-800/80 shadow-lg backdrop-blur-md">
-          <span className="text-xs font-bold uppercase text-slate-400">
+        <div className="bg-white dark:bg-slate-900/90 p-5 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-md backdrop-blur-md transition-colors">
+          <span className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400">
             Mensalidades Pendentes / Atrasadas
           </span>
-          <div className="text-2xl font-black text-rose-400 mt-1">
+          <div className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-1">
             {formatCurrency(totalPendingRevenue)}
           </div>
         </div>
 
-        <div className="bg-slate-900/90 p-5 rounded-2xl border border-slate-800/80 shadow-lg backdrop-blur-md">
-          <span className="text-xs font-bold uppercase text-slate-400">
+        <div className="bg-white dark:bg-slate-900/90 p-5 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-md backdrop-blur-md transition-colors">
+          <span className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400">
             Repasse Gympass no Mês
           </span>
-          <div className="text-2xl font-black text-blue-400 mt-1">
+          <div className="text-2xl font-black text-blue-600 dark:text-blue-400 mt-1">
             {formatCurrency(gympassTotalRevenue)} ({checkins.length} check-ins)
           </div>
         </div>
       </div>
 
       {/* Tabs Toolbar */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+      <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setActiveTab("mensalidades")}
             className={`px-4 py-2 text-xs font-bold rounded-xl transition-all ${
               activeTab === "mensalidades"
                 ? "bg-gradient-to-r from-rose-600 to-red-500 text-white shadow-md shadow-rose-600/25"
-                : "text-slate-400 hover:text-white"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
             }`}
           >
             Mensalidades ({payments.length})
@@ -135,7 +135,7 @@ export function FinancialClientView({
             className={`px-4 py-2 text-xs font-bold rounded-xl transition-all ${
               activeTab === "gympass"
                 ? "bg-gradient-to-r from-rose-600 to-red-500 text-white shadow-md shadow-rose-600/25"
-                : "text-slate-400 hover:text-white"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
             }`}
           >
             Gympass Check-ins ({checkins.length})
@@ -154,9 +154,9 @@ export function FinancialClientView({
 
       {/* Tab 1: Mensalidades */}
       {activeTab === "mensalidades" && (
-        <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl overflow-hidden shadow-lg backdrop-blur-md">
-          <div className="p-4 bg-slate-800/40 border-b border-slate-800 flex items-center justify-between">
-            <span className="font-bold text-sm text-white">
+        <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800/80 rounded-2xl overflow-hidden shadow-md backdrop-blur-md transition-colors">
+          <div className="p-4 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <span className="font-bold text-sm text-slate-900 dark:text-white">
               Cobranças de Mensalidade
             </span>
 
@@ -164,7 +164,7 @@ export function FinancialClientView({
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-1.5 text-xs font-semibold bg-slate-800 border border-slate-700/60 rounded-xl text-white focus:outline-none"
+              className="px-3 py-1.5 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700/60 rounded-xl text-slate-900 dark:text-white focus:outline-none"
             >
               <option value="ALL">Todos os Status</option>
               <option value="PAGO">Pagas</option>
@@ -173,18 +173,18 @@ export function FinancialClientView({
             </select>
           </div>
 
-          <div className="divide-y divide-slate-800/80">
+          <div className="divide-y divide-slate-200 dark:divide-slate-800/80">
             {filteredPayments.length > 0 ? (
               filteredPayments.map((p) => (
                 <div
                   key={p.id}
-                  className="p-4 flex items-center justify-between hover:bg-slate-800/30 transition-colors"
+                  className="p-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors"
                 >
                   <div>
-                    <div className="font-semibold text-sm text-white">
+                    <div className="font-semibold text-sm text-slate-900 dark:text-white">
                       {p.student.name}
                     </div>
-                    <div className="text-xs text-slate-400">
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
                       Vencimento: Dia {p.student.dueDay} • Valor: {formatCurrency(p.amount)}
                     </div>
                   </div>

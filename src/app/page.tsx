@@ -198,7 +198,7 @@ export default async function DashboardPage() {
 
             {stats.birthdayStudents.length > 0 ? (
               <div className="space-y-3">
-                {stats.birthdayStudents.map((student) => {
+                {stats.birthdayStudents.map((student: { id: string; name: string; birthDate: Date; beltRank: string; phone?: string }) => {
                   const day = new Date(student.birthDate).getDate()
                   const phoneClean = student.phone?.replace(/\D/g, "")
                   const whatsappUrl = phoneClean
@@ -247,7 +247,7 @@ export default async function DashboardPage() {
             </div>
 
             <div className="space-y-3">
-              {stats.recentGraduations.map((grad) => (
+              {stats.recentGraduations.map((grad: { id: string; fromBelt: string; toBelt: string; date: Date; student: { name: string } }) => (
                 <div
                   key={grad.id}
                   className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800"

@@ -89,16 +89,16 @@ export async function getDashboardStats() {
   ])
 
   // Paid vs Pending
-  const paidPayments = monthlyPayments.filter((p) => p.status === "PAGO")
-  const pendingPayments = monthlyPayments.filter((p) => p.status === "PENDENTE")
-  const overduePayments = monthlyPayments.filter((p) => p.status === "ATRASADO")
+  const paidPayments = monthlyPayments.filter((p: { status: string }) => p.status === "PAGO")
+  const pendingPayments = monthlyPayments.filter((p: { status: string }) => p.status === "PENDENTE")
+  const overduePayments = monthlyPayments.filter((p: { status: string }) => p.status === "ATRASADO")
 
-  const monthlyRevenue = paidPayments.reduce((acc, p) => acc + p.amount, 0)
-  const pendingRevenue = [...pendingPayments, ...overduePayments].reduce((acc, p) => acc + p.amount, 0)
+  const monthlyRevenue = paidPayments.reduce((acc: number, p: { amount: number }) => acc + p.amount, 0)
+  const pendingRevenue = [...pendingPayments, ...overduePayments].reduce((acc: number, p: { amount: number }) => acc + p.amount, 0)
 
   // Gympass revenue
   const gympassTotalCheckins = gympassCheckins.length
-  const gympassRevenue = gympassCheckins.reduce((acc, c) => acc + c.value, 0)
+  const gympassRevenue = gympassCheckins.reduce((acc: number, c: { value: number }) => acc + c.value, 0)
 
   // Birthday students in current month
   const allStudents = await prisma.student.findMany({
@@ -106,7 +106,7 @@ export async function getDashboardStats() {
     select: { id: true, name: true, birthDate: true, beltRank: true, phone: true },
   })
 
-  const birthdayStudents = allStudents.filter((s) => {
+  const birthdayStudents = allStudents.filter((s: { birthDate: Date }) => {
     const bMonth = new Date(s.birthDate).getMonth() + 1
     return bMonth === currentMonth
   })
@@ -131,7 +131,7 @@ export async function getDashboardStats() {
 
   // Distribution by belt
   const beltsCount: Record<string, number> = {}
-  allStudents.forEach((s) => {
+  allStudents.forEach((s: { beltRank: string }) => {
     beltsCount[s.beltRank] = (beltsCount[s.beltRank] || 0) + 1
   })
 
@@ -269,6 +269,8 @@ export async function createStudent(data: {
   medicationDesc?: string
   medicalNotes?: string
   beltRank: string
+  weight?: number
+  height?: number
   paymentType: string
   monthlyFee?: number
   dueDay?: number
@@ -519,3 +521,245 @@ export async function createEvent(data: {
   revalidatePath("/campeonatos")
   return event
 }
+
+export async function deleteEvent(id: string) {
+  await prisma.event.delete({ where: { id } })
+  revalidatePath("/campeonatos")
+}
+
+export async function deleteSchedule(id: string) {
+  await prisma.schedule.delete({ where: { id } })
+  revalidatePath("/horarios")
+  revalidatePath("/alunos")
+  revalidatePath("/")
+}
+
+export async function createModality(data: { eventId: string; name: string; type: string }) {
+  const modality = await prisma.modality.create({ data })
+  revalidatePath("/campeonatos")
+  return modality
+}
+
+export async function createCategory(data: {
+  modalityId: string
+  name: string
+  beltRange?: string
+  gender?: string
+  minAge?: number
+  maxAge?: number
+}) {
+  const category = await prisma.category.create({ data })
+  revalidatePath("/campeonatos")
+  return category
+}
+
+export async function registerStudentInCategory(data: {
+  categoryId: string
+  studentId: string
+  paidRegistration?: boolean
+  amountPaid?: number
+  notes?: string
+}) {
+  const student = await prisma.student.findUnique({
+    where: { id: data.studentId },
+    select: { weight: true },
+  })
+
+  const initialWeight = student?.weight && student.weight > 0 ? student.weight : null
+
+  const participant = await prisma.eventParticipant.upsert({
+    where: {
+      categoryId_studentId: {
+        categoryId: data.categoryId,
+        studentId: data.studentId,
+      },
+    },
+    update: {
+      paidRegistration: data.paidRegistration ?? true,
+      amountPaid: data.amountPaid ?? 0,
+      notes: data.notes ?? "",
+      weight: initialWeight ?? undefined,
+    },
+    create: {
+      categoryId: data.categoryId,
+      studentId: data.studentId,
+      paidRegistration: data.paidRegistration ?? true,
+      amountPaid: data.amountPaid ?? 0,
+      weight: initialWeight,
+      notes: data.notes ?? "",
+    },
+  })
+  revalidatePath("/campeonatos")
+  return participant
+}
+
+export async function removeStudentFromCategory(categoryId: string, studentId: string) {
+  await prisma.eventParticipant.delete({
+    where: {
+      categoryId_studentId: {
+        categoryId,
+        studentId,
+      },
+    },
+  })
+  revalidatePath("/campeonatos")
+}
+
+export async function updateEvent(
+  id: string,
+  data: {
+    name?: string
+    status?: string
+    date?: Date
+    location?: string
+    organization?: string
+    registrationFee?: number
+    notes?: string
+  }
+) {
+  const updated = await prisma.event.update({
+    where: { id },
+    data,
+  })
+  revalidatePath("/campeonatos")
+  return updated
+}
+
+export async function updateParticipant(
+  id: string,
+  data: {
+    paidRegistration?: boolean
+    amountPaid?: number
+    weight?: number
+    medal?: string
+    placement?: number
+    metric?: number
+    score?: number
+    notes?: string
+  }
+) {
+  const updated = await prisma.eventParticipant.update({
+    where: { id },
+    data,
+  })
+  revalidatePath("/campeonatos")
+  return updated
+}
+
+export async function generateBrackets(categoryId: string) {
+  await prisma.bracketMatch.deleteMany({ where: { categoryId } })
+
+  const rawParticipants = await prisma.eventParticipant.findMany({
+    where: { categoryId },
+    include: { student: true },
+  })
+
+  if (rawParticipants.length < 2) return
+
+  // Sort participants using weighed weight or student registered weight ascending
+  const participants = [...rawParticipants].sort((a, b) => {
+    const weightA = a.weight && a.weight > 0 ? a.weight : a.student.weight || 0
+    const weightB = b.weight && b.weight > 0 ? b.weight : b.student.weight || 0
+    return weightA - weightB
+  })
+
+  if (participants.length < 2) return
+
+  const matchPromises = []
+  for (let i = 0; i < participants.length; i += 2) {
+    const athlete1 = participants[i]
+    const athlete2 = participants[i + 1]
+
+    matchPromises.push(
+      prisma.bracketMatch.create({
+        data: {
+          categoryId,
+          round: 1,
+          position: Math.floor(i / 2) + 1,
+          athlete1Id: athlete1 ? athlete1.studentId : null,
+          athlete2Id: athlete2 ? athlete2.studentId : null,
+          isBye: !athlete2,
+          winnerId: !athlete2 && athlete1 ? athlete1.studentId : null,
+        },
+      })
+    )
+  }
+
+  await Promise.all(matchPromises)
+  revalidatePath("/campeonatos")
+}
+
+export async function swapBracketAthletes(
+  matchId: string,
+  athlete1Id: string | null,
+  athlete2Id: string | null
+) {
+  const updated = await prisma.bracketMatch.update({
+    where: { id: matchId },
+    data: {
+      athlete1Id,
+      athlete2Id,
+      winnerId: null, // Reset winner when athletes are changed
+    },
+  })
+  revalidatePath("/campeonatos")
+  return updated
+}
+
+export async function updateBracketMatch(
+  matchId: string,
+  winnerId: string,
+  score?: string
+) {
+  const updated = await prisma.bracketMatch.update({
+    where: { id: matchId },
+    data: { winnerId, score: score || "" },
+  })
+  revalidatePath("/campeonatos")
+  return updated
+}
+
+export async function autoRankMeasurementCategory(categoryId: string) {
+  const participants = await prisma.eventParticipant.findMany({
+    where: {
+      categoryId,
+      metric: { not: null },
+    },
+    orderBy: { metric: "desc" },
+  })
+
+  if (participants.length === 0) return
+
+  // Assign ranks & medals considering ties (empates)
+  let currentRank = 1
+  for (let i = 0; i < participants.length; i++) {
+    const p = participants[i]
+    const prev = i > 0 ? participants[i - 1] : null
+
+    // Check tie with previous athlete
+    if (prev && prev.metric === p.metric) {
+      // Tie! Same rank & medal as previous
+    } else if (i > 0) {
+      currentRank = i + 1
+    }
+
+    let medal: string | null = null
+    if (currentRank === 1) medal = "OURO"
+    else if (currentRank === 2) medal = "PRATA"
+    else if (currentRank === 3) medal = "BRONZE"
+
+    await prisma.eventParticipant.update({
+      where: { id: p.id },
+      data: {
+        placement: currentRank,
+        medal,
+      },
+    })
+  }
+
+  revalidatePath("/campeonatos")
+}
+
+
+
+

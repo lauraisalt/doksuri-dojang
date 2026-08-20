@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { BELT_RANKS, STUDENT_STATUS, PAYMENT_TYPES, getBeltInfo } from "@/lib/constants"
 import {
   Search,
@@ -23,7 +23,7 @@ import {
   Trash2,
   Eye,
 } from "lucide-react"
-import { createStudent, deleteStudent, addGraduation } from "@/lib/db-actions"
+import { createStudent, updateStudent, deleteStudent, addGraduation } from "@/lib/db-actions"
 import { useRouter } from "next/navigation"
 
 interface Props {
@@ -40,7 +40,11 @@ export function StudentClientView({
   initialAction,
 }: Props) {
   const router = useRouter()
-  const [students] = useState(initialStudents)
+  const [students, setStudents] = useState(initialStudents)
+
+  useEffect(() => {
+    setStudents(initialStudents)
+  }, [initialStudents])
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("ALL")
   const [beltFilter, setBeltFilter] = useState("ALL")
@@ -74,6 +78,8 @@ export function StudentClientView({
     medicationDesc: "",
     medicalNotes: "",
     beltRank: "BRANCA",
+    weight: "" as number | "",
+    height: "" as number | "",
     paymentType: "MENSALIDADE",
     monthlyFee: 150,
     dueDay: 10,
@@ -120,7 +126,9 @@ export function StudentClientView({
     return matchesQuery && matchesStatus && matchesBelt && matchesPayment
   })
 
-  // Submit New Student Form
+  const [isEditing, setIsEditing] = useState(false)
+
+  // Submit Student Form (Create or Edit)
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!formData.name || !formData.birthDate) {
@@ -129,18 +137,28 @@ export function StudentClientView({
     }
 
     try {
-      await createStudent({
+      const payload = {
         ...formData,
         birthDate: new Date(formData.birthDate),
+        weight: formData.weight !== "" ? Number(formData.weight) : 0,
+        height: formData.height !== "" ? Number(formData.height) : 0,
         monthlyFee: Number(formData.monthlyFee),
         dueDay: Number(formData.dueDay),
         gympassCheckinValue: Number(formData.gympassCheckinValue),
-      })
+      }
+
+      if (isEditing && activeStudent) {
+        await updateStudent(activeStudent.id, payload)
+      } else {
+        await createStudent(payload)
+      }
       setIsCreateOpen(false)
+      setIsEditing(false)
+      setActiveStudent(null)
       router.refresh()
     } catch (err) {
       console.error(err)
-      alert("Erro ao criar aluno.")
+      alert(isEditing ? "Erro ao atualizar aluno." : "Erro ao criar aluno.")
     }
   }
 
@@ -178,7 +196,7 @@ export function StudentClientView({
   return (
     <div className="space-y-6">
       {/* Search & Filter Toolbar */}
-      <div className="bg-slate-900/90 p-4 rounded-2xl border border-slate-800/80 shadow-lg backdrop-blur-md flex flex-col md:flex-row gap-4 justify-between items-center">
+      <div className="bg-white dark:bg-slate-900/90 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-md backdrop-blur-md flex flex-col md:flex-row gap-4 justify-between items-center transition-colors">
         {/* Search Bar */}
         <div className="relative w-full md:w-80">
           <Search className="absolute left-3.5 top-2.5 w-4 h-4 text-slate-400" />
@@ -187,7 +205,7 @@ export function StudentClientView({
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Pesquisar por nome, telefone..."
-            className="w-full pl-10 pr-4 py-2 text-sm bg-slate-800/80 border border-slate-700/60 rounded-xl text-white placeholder-slate-400 focus:outline-none focus:border-rose-500"
+            className="w-full pl-10 pr-4 py-2 text-sm bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700/60 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-rose-500"
           />
         </div>
 
@@ -197,7 +215,7 @@ export function StudentClientView({
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 text-xs font-semibold bg-slate-800 border border-slate-700/60 rounded-xl text-slate-200 focus:outline-none"
+            className="px-3 py-2 text-xs font-semibold bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700/60 rounded-xl text-slate-800 dark:text-slate-200 focus:outline-none"
           >
             <option value="ALL">Todos os Status</option>
             <option value="ATIVO">Ativos</option>
@@ -209,7 +227,7 @@ export function StudentClientView({
           <select
             value={beltFilter}
             onChange={(e) => setBeltFilter(e.target.value)}
-            className="px-3 py-2 text-xs font-semibold bg-slate-800 border border-slate-700/60 rounded-xl text-slate-200 focus:outline-none"
+            className="px-3 py-2 text-xs font-semibold bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700/60 rounded-xl text-slate-800 dark:text-slate-200 focus:outline-none"
           >
             <option value="ALL">Todas as Faixas</option>
             {BELT_RANKS.map((b) => (
@@ -223,7 +241,7 @@ export function StudentClientView({
           <select
             value={paymentFilter}
             onChange={(e) => setPaymentFilter(e.target.value)}
-            className="px-3 py-2 text-xs font-semibold bg-slate-800 border border-slate-700/60 rounded-xl text-slate-200 focus:outline-none"
+            className="px-3 py-2 text-xs font-semibold bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700/60 rounded-xl text-slate-800 dark:text-slate-200 focus:outline-none"
           >
             <option value="ALL">Todas as Modalidades</option>
             <option value="MENSALIDADE">Mensalidade</option>
@@ -232,7 +250,38 @@ export function StudentClientView({
 
           {/* Create Button */}
           <button
-            onClick={() => setIsCreateOpen(true)}
+            onClick={() => {
+              setIsEditing(false)
+              setFormData({
+                name: "",
+                gender: "MASCULINO",
+                birthDate: "",
+                phone: "",
+                email: "",
+                guardianName: "",
+                guardianPhone: "",
+                fatherName: "",
+                motherName: "",
+                hasPhysicalLimitation: false,
+                physicalLimitationDesc: "",
+                hasDisease: false,
+                diseaseDesc: "",
+                hasAllergies: false,
+                allergiesDesc: "",
+                usesMedication: false,
+                medicationDesc: "",
+                medicalNotes: "",
+                beltRank: "BRANCA",
+                weight: "",
+                height: "",
+                paymentType: "MENSALIDADE",
+                monthlyFee: 150,
+                dueDay: 10,
+                gympassCheckinValue: 8.5,
+                scheduleIds: [],
+              })
+              setIsCreateOpen(true)
+            }}
             className="px-4 py-2 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-500 hover:to-red-400 text-white font-medium text-xs rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-rose-600/25 ml-auto"
           >
             <Plus className="w-4 h-4" /> Novo Aluno
@@ -242,11 +291,11 @@ export function StudentClientView({
 
       {/* Student List View */}
       {filteredStudents.length > 0 ? (
-        <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl overflow-hidden shadow-lg backdrop-blur-md">
+        <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800/80 rounded-2xl overflow-hidden shadow-md backdrop-blur-md transition-colors">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-800/50 border-b border-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                <tr className="bg-slate-100 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
                   <th className="py-3.5 px-4">Aluno</th>
                   <th className="py-3.5 px-4">Graduação</th>
                   <th className="py-3.5 px-4">Contato</th>
@@ -255,7 +304,7 @@ export function StudentClientView({
                   <th className="py-3.5 px-4 text-right">Ação</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60 text-sm">
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800/60 text-sm">
                 {filteredStudents.map((student) => {
                   const belt = getBeltInfo(student.beltRank)
                   const age = calculateAge(student.birthDate)
@@ -263,19 +312,19 @@ export function StudentClientView({
                   return (
                     <tr
                       key={student.id}
-                      className="hover:bg-slate-800/40 transition-colors group cursor-pointer"
+                      className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors group cursor-pointer"
                       onClick={() => setActiveStudent(student)}
                     >
                       <td className="py-3.5 px-4">
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-rose-500/15 text-rose-400 border border-rose-500/20 flex items-center justify-center font-bold text-sm">
+                          <div className="w-9 h-9 rounded-xl bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20 flex items-center justify-center font-bold text-sm">
                             {student.name.charAt(0)}
                           </div>
                           <div>
-                            <div className="font-semibold text-white group-hover:text-rose-400 transition-colors">
+                            <div className="font-semibold text-slate-900 dark:text-white group-hover:text-rose-600 dark:group-hover:text-rose-400 transition-colors">
                               {student.name}
                             </div>
-                            <div className="text-xs text-slate-400">
+                            <div className="text-xs text-slate-500 dark:text-slate-400">
                               {age} anos • Matrícula em{" "}
                               {new Date(student.enrollmentDate).toLocaleDateString("pt-BR")}
                             </div>
@@ -293,7 +342,7 @@ export function StudentClientView({
                           {belt.label}
                         </span>
                       </td>
-                      <td className="py-3.5 px-4 text-xs text-slate-400">
+                      <td className="py-3.5 px-4 text-xs text-slate-600 dark:text-slate-400">
                         <div>{student.phone || "Sem telefone"}</div>
                         <div className="text-slate-500">{student.email}</div>
                       </td>
@@ -301,8 +350,8 @@ export function StudentClientView({
                         <span
                           className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${
                             student.paymentType === "GYMPASS"
-                              ? "bg-rose-500/15 text-rose-400 border-rose-500/20"
-                              : "bg-blue-500/15 text-blue-400 border-blue-500/20"
+                              ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/20"
+                              : "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20"
                           }`}
                         >
                           {student.paymentType}
@@ -312,10 +361,10 @@ export function StudentClientView({
                         <span
                           className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${
                             student.status === "ATIVO"
-                              ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/20"
+                              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
                               : student.status === "TRANCADO"
-                              ? "bg-amber-500/15 text-amber-400 border-amber-500/20"
-                              : "bg-slate-800 text-slate-400 border-slate-700"
+                              ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                              : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700"
                           }`}
                         >
                           {student.status}
@@ -327,7 +376,7 @@ export function StudentClientView({
                             e.stopPropagation()
                             setActiveStudent(student)
                           }}
-                          className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
+                          className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-xl hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
                           title="Ver Detalhes"
                         >
                           <Eye className="w-4 h-4" />
@@ -341,12 +390,12 @@ export function StudentClientView({
           </div>
         </div>
       ) : (
-        <div className="p-12 text-center bg-slate-900/90 border border-slate-800/80 rounded-2xl shadow-lg backdrop-blur-md">
-          <User className="w-10 h-10 text-slate-500 mx-auto mb-3" />
-          <h3 className="text-base font-bold text-slate-200">
+        <div className="p-12 text-center bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800/80 rounded-2xl shadow-md backdrop-blur-md">
+          <User className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+          <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">
             Nenhum aluno encontrado
           </h3>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Tente ajustar seus termos de pesquisa ou filtros.
           </p>
         </div>
@@ -383,6 +432,44 @@ export function StudentClientView({
               </div>
 
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const s = activeStudent
+                    setFormData({
+                      name: s.name || "",
+                      gender: s.gender || "MASCULINO",
+                      birthDate: s.birthDate ? new Date(s.birthDate).toISOString().split("T")[0] : "",
+                      phone: s.phone || "",
+                      email: s.email || "",
+                      guardianName: s.guardianName || "",
+                      guardianPhone: s.guardianPhone || "",
+                      fatherName: s.fatherName || "",
+                      motherName: s.motherName || "",
+                      hasPhysicalLimitation: s.hasPhysicalLimitation || false,
+                      physicalLimitationDesc: s.physicalLimitationDesc || "",
+                      hasDisease: s.hasDisease || false,
+                      diseaseDesc: s.diseaseDesc || "",
+                      hasAllergies: s.hasAllergies || false,
+                      allergiesDesc: s.allergiesDesc || "",
+                      usesMedication: s.usesMedication || false,
+                      medicationDesc: s.medicationDesc || "",
+                      medicalNotes: s.medicalNotes || "",
+                      beltRank: s.beltRank || "BRANCA",
+                      weight: s.weight && s.weight > 0 ? s.weight : "",
+                      height: s.height && s.height > 0 ? s.height : "",
+                      paymentType: s.paymentType || "MENSALIDADE",
+                      monthlyFee: s.monthlyFee || 150,
+                      dueDay: s.dueDay || 10,
+                      gympassCheckinValue: s.gympassCheckinValue || 8.5,
+                      scheduleIds: s.schedules ? s.schedules.map((sc: any) => sc.scheduleId) : [],
+                    })
+                    setIsEditing(true)
+                    setIsCreateOpen(true)
+                  }}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl flex items-center gap-1 border border-slate-700"
+                >
+                  <Edit2 className="w-3.5 h-3.5" /> Editar
+                </button>
                 <button
                   onClick={() => setIsGraduationOpen(true)}
                   className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl flex items-center gap-1"
@@ -422,6 +509,12 @@ export function StudentClientView({
                     </div>
                     <div>
                       <strong>E-mail:</strong> {activeStudent.email || "Não informado"}
+                    </div>
+                    <div>
+                      <strong>Peso Cadastrado:</strong> {activeStudent.weight ? `${activeStudent.weight} kg` : "Não informado"}
+                    </div>
+                    <div>
+                      <strong>Altura Cadastrada:</strong> {activeStudent.height ? `${activeStudent.height} m` : "Não informada"}
                     </div>
                     <div>
                       <strong>Tipo Pagamento:</strong> {activeStudent.paymentType}
@@ -608,6 +701,38 @@ export function StudentClientView({
                       className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none focus:border-rose-500"
                     />
                   </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Peso Cadastrado (kg)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={formData.weight}
+                      onChange={(e) =>
+                        setFormData({ ...formData, weight: e.target.value === "" ? "" : Number(e.target.value) })
+                      }
+                      placeholder="Ex: 75.0"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none focus:border-rose-500 text-slate-900 dark:text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Altura Cadastrada (m)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formData.height}
+                      onChange={(e) =>
+                        setFormData({ ...formData, height: e.target.value === "" ? "" : Number(e.target.value) })
+                      }
+                      placeholder="Ex: 1.70"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none focus:border-rose-500 text-slate-900 dark:text-white"
+                    />
+                  </div>
                 </div>
 
                 {/* Guardian Block if Minor */}
@@ -641,32 +766,112 @@ export function StudentClientView({
                 )}
               </div>
 
-              {/* Ficha Médica */}
+              {/* Ficha Médica Detalhada */}
               <div className="space-y-3">
                 <h3 className="font-bold text-xs uppercase text-slate-400 tracking-wider">
-                  2. Ficha Médica
+                  2. Ficha Médica & Restrições
                 </h3>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  <label className="flex items-center gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.hasPhysicalLimitation}
-                      onChange={(e) =>
-                        setFormData({ ...formData, hasPhysicalLimitation: e.target.checked })
-                      }
-                    />
-                    <span>Possui Limitação Física?</span>
-                  </label>
+                  {/* Limitação Física */}
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer font-semibold text-slate-900 dark:text-white">
+                      <input
+                        type="checkbox"
+                        checked={formData.hasPhysicalLimitation}
+                        onChange={(e) =>
+                          setFormData({ ...formData, hasPhysicalLimitation: e.target.checked })
+                        }
+                        className="rounded text-rose-600 focus:ring-rose-500"
+                      />
+                      <span>Possui Limitação Física?</span>
+                    </label>
+                    {formData.hasPhysicalLimitation && (
+                      <input
+                        type="text"
+                        placeholder="Descreva as limitações físicas..."
+                        value={formData.physicalLimitationDesc}
+                        onChange={(e) =>
+                          setFormData({ ...formData, physicalLimitationDesc: e.target.value })
+                        }
+                        className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white"
+                      />
+                    )}
+                  </div>
 
-                  <label className="flex items-center gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.hasDisease}
-                      onChange={(e) => setFormData({ ...formData, hasDisease: e.target.checked })}
-                    />
-                    <span>Possui Alguma Doença?</span>
-                  </label>
+                  {/* Doença */}
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer font-semibold text-slate-900 dark:text-white">
+                      <input
+                        type="checkbox"
+                        checked={formData.hasDisease}
+                        onChange={(e) => setFormData({ ...formData, hasDisease: e.target.checked })}
+                        className="rounded text-rose-600 focus:ring-rose-500"
+                      />
+                      <span>Possui Alguma Doença?</span>
+                    </label>
+                    {formData.hasDisease && (
+                      <input
+                        type="text"
+                        placeholder="Descreva a(s) doença(s)..."
+                        value={formData.diseaseDesc}
+                        onChange={(e) => setFormData({ ...formData, diseaseDesc: e.target.value })}
+                        className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white"
+                      />
+                    )}
+                  </div>
+
+                  {/* Alergias */}
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer font-semibold text-slate-900 dark:text-white">
+                      <input
+                        type="checkbox"
+                        checked={formData.hasAllergies}
+                        onChange={(e) =>
+                          setFormData({ ...formData, hasAllergies: e.target.checked })
+                        }
+                        className="rounded text-rose-600 focus:ring-rose-500"
+                      />
+                      <span>Possui Alergias?</span>
+                    </label>
+                    {formData.hasAllergies && (
+                      <input
+                        type="text"
+                        placeholder="Descreva a(s) alergia(s)..."
+                        value={formData.allergiesDesc}
+                        onChange={(e) =>
+                          setFormData({ ...formData, allergiesDesc: e.target.value })
+                        }
+                        className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white"
+                      />
+                    )}
+                  </div>
+
+                  {/* Medicamento Contínuo */}
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer font-semibold text-slate-900 dark:text-white">
+                      <input
+                        type="checkbox"
+                        checked={formData.usesMedication}
+                        onChange={(e) =>
+                          setFormData({ ...formData, usesMedication: e.target.checked })
+                        }
+                        className="rounded text-rose-600 focus:ring-rose-500"
+                      />
+                      <span>Usa Medicamento Contínuo?</span>
+                    </label>
+                    {formData.usesMedication && (
+                      <input
+                        type="text"
+                        placeholder="Descreva o(s) medicamento(s)..."
+                        value={formData.medicationDesc}
+                        onChange={(e) =>
+                          setFormData({ ...formData, medicationDesc: e.target.value })
+                        }
+                        className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white"
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
 
