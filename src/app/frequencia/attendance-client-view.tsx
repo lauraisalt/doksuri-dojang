@@ -77,7 +77,7 @@ export function AttendanceClientView({ schedules }: Props) {
   return (
     <div className="space-y-6">
       {/* Pickers Bar */}
-      <div className="bg-slate-900/90 p-4 rounded-2xl border border-slate-800/80 shadow-lg backdrop-blur-md flex flex-col md:flex-row gap-4 items-center justify-between">
+      <div className="bg-white dark:bg-slate-900/90 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-md backdrop-blur-md flex flex-col md:flex-row gap-4 items-center justify-between transition-colors">
         <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
           {/* Date Picker */}
           <div className="flex items-center gap-2">
@@ -86,7 +86,7 @@ export function AttendanceClientView({ schedules }: Props) {
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="px-3 py-2 text-xs font-semibold bg-slate-800 border border-slate-700/60 rounded-xl text-white focus:outline-none"
+              className="px-3 py-2 text-xs font-semibold bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700/60 rounded-xl text-slate-900 dark:text-white focus:outline-none"
             />
           </div>
 
@@ -96,7 +96,7 @@ export function AttendanceClientView({ schedules }: Props) {
             <select
               value={selectedScheduleId}
               onChange={(e) => setSelectedScheduleId(e.target.value)}
-              className="px-3 py-2 text-xs font-semibold bg-slate-800 border border-slate-700/60 rounded-xl text-white focus:outline-none"
+              className="px-3 py-2 text-xs font-semibold bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700/60 rounded-xl text-slate-900 dark:text-white focus:outline-none"
             >
               {schedules.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -120,36 +120,36 @@ export function AttendanceClientView({ schedules }: Props) {
 
       {/* Class Attendance Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-slate-900/90 p-4 rounded-2xl border border-slate-800/80 shadow-lg backdrop-blur-md">
-          <span className="text-xs text-slate-400 font-bold uppercase">Matriculados na Turma</span>
-          <div className="text-2xl font-black text-white mt-1">
+        <div className="bg-white dark:bg-slate-900/90 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-md backdrop-blur-md transition-colors">
+          <span className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase">Matriculados na Turma</span>
+          <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
             {totalCount} alunos
           </div>
         </div>
 
-        <div className="bg-slate-900/90 p-4 rounded-2xl border border-slate-800/80 shadow-lg backdrop-blur-md">
-          <span className="text-xs text-emerald-400 font-bold uppercase">Presentes</span>
-          <div className="text-2xl font-black text-emerald-400 mt-1">
+        <div className="bg-white dark:bg-slate-900/90 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-md backdrop-blur-md transition-colors">
+          <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold uppercase">Presentes</span>
+          <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
             {presentCount} ({pct}%)
           </div>
         </div>
 
-        <div className="bg-slate-900/90 p-4 rounded-2xl border border-slate-800/80 shadow-lg backdrop-blur-md">
-          <span className="text-xs text-rose-400 font-bold uppercase">Ausentes</span>
-          <div className="text-2xl font-black text-rose-400 mt-1">{absentCount}</div>
+        <div className="bg-white dark:bg-slate-900/90 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-md backdrop-blur-md transition-colors">
+          <span className="text-xs text-rose-600 dark:text-rose-400 font-bold uppercase">Ausentes</span>
+          <div className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-1">{absentCount}</div>
         </div>
       </div>
 
       {/* Roll Call Table */}
       {enrolledStudents.length > 0 ? (
-        <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl overflow-hidden shadow-lg backdrop-blur-md">
-          <div className="p-4 bg-slate-800/40 border-b border-slate-800 flex items-center justify-between">
-            <span className="font-bold text-sm text-white">
+        <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800/80 rounded-2xl overflow-hidden shadow-md backdrop-blur-md transition-colors">
+          <div className="p-4 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <span className="font-bold text-sm text-slate-900 dark:text-white">
               Lista de Presença — {attendanceData?.schedule?.dayOfWeek} ({attendanceData?.schedule?.time})
             </span>
           </div>
 
-          <div className="divide-y divide-slate-800/80">
+          <div className="divide-y divide-slate-200 dark:divide-slate-800/80">
             {enrolledStudents.map((item: any) => {
               const student = item.student
               const belt = getBeltInfo(student.beltRank)
@@ -158,19 +158,19 @@ export function AttendanceClientView({ schedules }: Props) {
               return (
                 <div
                   key={student.id}
-                  className="p-4 flex items-center justify-between hover:bg-slate-800/30 transition-colors"
+                  className="p-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors"
                 >
                   <div className="flex items-center gap-3">
                     <span
-                      className="w-3 h-3 rounded-full border border-slate-600 shrink-0"
+                      className="w-3 h-3 rounded-full border border-slate-300 dark:border-slate-600 shrink-0"
                       style={{ backgroundColor: belt.color }}
                       title={belt.label}
                     />
                     <div>
-                      <div className="font-semibold text-sm text-white">
+                      <div className="font-semibold text-sm text-slate-900 dark:text-white">
                         {student.name}
                       </div>
-                      <div className="text-xs text-slate-400">
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
                         {belt.label} • {student.paymentType}
                       </div>
                     </div>

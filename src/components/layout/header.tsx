@@ -22,9 +22,14 @@ export function Header() {
         document.documentElement.classList.remove("dark")
       }
     } else {
-      document.documentElement.classList.add("dark")
-      setTheme("dark")
-      localStorage.setItem("dojang_theme", "dark")
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches
+      const defaultTheme = prefersDark ? "dark" : "light"
+      setTheme(defaultTheme)
+      if (prefersDark) {
+        document.documentElement.classList.add("dark")
+      } else {
+        document.documentElement.classList.remove("dark")
+      }
     }
   }, [])
 

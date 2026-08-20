@@ -38,6 +38,8 @@ model Student {
 
   // Academia
   beltRank       String   // BRANCA, AMARELA, LARANJA, VERDE, AZUL, VERMELHA, MARROM, PRETA_1DAN...
+  weight         Float?   @default(0)
+  height         Float?   @default(0)
   lastGraduation DateTime?
   enrollmentDate DateTime @default(now())
   status         String   @default("ATIVO") // ATIVO, INATIVO, TRANCADO
