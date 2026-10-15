@@ -2,6 +2,7 @@
 
 import { prisma } from "./prisma"
 import { revalidatePath } from "next/cache"
+import { BELT_RANKS } from "./constants"
 
 // ─── Settings ───────────────────────────────────────────────────────────────
 
@@ -23,6 +24,8 @@ export async function getSettings() {
 
 export async function updateSettings(data: {
   academyName: string
+  logoUrl?: string
+  primaryColor?: string
   defaultMonthlyFee: number
   defaultGympassValue: number
   defaultDueDay: number
@@ -31,6 +34,40 @@ export async function updateSettings(data: {
     where: { id: "default" },
     update: data,
     create: { id: "default", ...data },
+  })
+  revalidatePath("/")
+  return updated
+}
+
+export async function deleteDojangLogo() {
+  const updated = await prisma.settings.update({
+    where: { id: "default" },
+    data: { logoUrl: "" },
+  })
+  revalidatePath("/")
+  return updated
+}
+
+export async function resetSettings() {
+  const updated = await prisma.settings.upsert({
+    where: { id: "default" },
+    update: {
+      academyName: "Instituto Dok Su Ri - Unidade 3",
+      logoUrl: "",
+      primaryColor: "rose",
+      defaultMonthlyFee: 150.0,
+      defaultGympassValue: 8.5,
+      defaultDueDay: 10,
+    },
+    create: {
+      id: "default",
+      academyName: "Instituto Dok Su Ri - Unidade 3",
+      logoUrl: "",
+      primaryColor: "rose",
+      defaultMonthlyFee: 150.0,
+      defaultGympassValue: 8.5,
+      defaultDueDay: 10,
+    },
   })
   revalidatePath("/")
   return updated
@@ -187,7 +224,6 @@ export async function getStudents(query?: string, status?: string, beltRank?: st
         include: { schedule: true },
       },
       payments: {
-        take: 5,
         orderBy: [{ year: "desc" }, { month: "desc" }],
       },
       checkins: {
@@ -255,6 +291,7 @@ export async function createStudent(data: {
   birthDate: Date
   phone?: string
   email?: string
+  beltSize?: string
   guardianName?: string
   guardianPhone?: string
   fatherName?: string
@@ -294,6 +331,7 @@ export async function createStudent(data: {
   }
 
   revalidatePath("/alunos")
+  revalidatePath("/horarios")
   revalidatePath("/")
   return student
 }
@@ -323,6 +361,7 @@ export async function updateStudent(
 
   revalidatePath(`/alunos/${id}`)
   revalidatePath("/alunos")
+  revalidatePath("/horarios")
   revalidatePath("/")
   return student
 }
@@ -330,6 +369,7 @@ export async function updateStudent(
 export async function deleteStudent(id: string) {
   await prisma.student.delete({ where: { id } })
   revalidatePath("/alunos")
+  revalidatePath("/horarios")
   revalidatePath("/")
 }
 
@@ -340,9 +380,19 @@ export async function addGraduation(data: {
   fromBelt: string
   toBelt: string
   date: Date
+  location?: string
   notes?: string
 }) {
-  const grad = await prisma.graduationHistory.create({ data })
+  const grad = await prisma.graduationHistory.create({
+    data: {
+      studentId: data.studentId,
+      fromBelt: data.fromBelt,
+      toBelt: data.toBelt,
+      date: data.date,
+      location: data.location || "",
+      notes: data.notes || "",
+    },
+  })
   await prisma.student.update({
     where: { id: data.studentId },
     data: { beltRank: data.toBelt, lastGraduation: data.date },
@@ -369,10 +419,50 @@ export async function createSchedule(data: {
   dayOfWeek: string
   time: string
   maxCapacity?: number
+  description?: string
 }) {
   const schedule = await prisma.schedule.create({ data })
   revalidatePath("/horarios")
   return schedule
+}
+
+export async function updateSchedule(
+  id: string,
+  data: {
+    dayOfWeek: string
+    time: string
+    maxCapacity?: number
+    description?: string
+  }
+) {
+  const updated = await prisma.schedule.update({
+    where: { id },
+    data,
+  })
+  revalidatePath("/horarios")
+  return updated
+}
+
+export async function enrollStudentInSchedule(studentId: string, scheduleId: string) {
+  const result = await prisma.studentSchedule.upsert({
+    where: {
+      studentId_scheduleId: { studentId, scheduleId },
+    },
+    create: { studentId, scheduleId },
+    update: {},
+  })
+  revalidatePath("/horarios")
+  revalidatePath("/alunos")
+  return result
+}
+
+export async function unenrollStudentFromSchedule(studentId: string, scheduleId: string) {
+  const result = await prisma.studentSchedule.deleteMany({
+    where: { studentId, scheduleId },
+  })
+  revalidatePath("/horarios")
+  revalidatePath("/alunos")
+  return result
 }
 
 // ─── Attendance ──────────────────────────────────────────────────────────────
@@ -540,6 +630,11 @@ export async function createModality(data: { eventId: string; name: string; type
   return modality
 }
 
+export async function deleteModality(id: string) {
+  await prisma.modality.delete({ where: { id } })
+  revalidatePath("/campeonatos")
+}
+
 export async function createCategory(data: {
   modalityId: string
   name: string
@@ -551,6 +646,11 @@ export async function createCategory(data: {
   const category = await prisma.category.create({ data })
   revalidatePath("/campeonatos")
   return category
+}
+
+export async function deleteCategory(id: string) {
+  await prisma.category.delete({ where: { id } })
+  revalidatePath("/campeonatos")
 }
 
 export async function registerStudentInCategory(data: {
@@ -588,9 +688,43 @@ export async function registerStudentInCategory(data: {
       weight: initialWeight,
       notes: data.notes ?? "",
     },
+    include: {
+      student: true,
+      category: true,
+    },
   })
   revalidatePath("/campeonatos")
   return participant
+}
+
+export async function saveManualBrackets(
+  categoryId: string,
+  matches: {
+    round: number
+    position: number
+    athlete1Id?: string | null
+    athlete2Id?: string | null
+    isBye?: boolean
+    winnerId?: string | null
+  }[]
+) {
+  await prisma.bracketMatch.deleteMany({ where: { categoryId } })
+
+  if (matches.length > 0) {
+    await prisma.bracketMatch.createMany({
+      data: matches.map((m) => ({
+        categoryId,
+        round: m.round,
+        position: m.position,
+        athlete1Id: m.athlete1Id || null,
+        athlete2Id: m.athlete2Id || null,
+        isBye: m.isBye ?? (!m.athlete2Id),
+        winnerId: m.winnerId || (!m.athlete2Id && m.athlete1Id ? m.athlete1Id : null),
+      })),
+    })
+  }
+
+  revalidatePath("/campeonatos")
 }
 
 export async function removeStudentFromCategory(categoryId: string, studentId: string) {
@@ -630,11 +764,11 @@ export async function updateParticipant(
   data: {
     paidRegistration?: boolean
     amountPaid?: number
-    weight?: number
-    medal?: string
-    placement?: number
-    metric?: number
-    score?: number
+    weight?: number | null
+    medal?: string | null
+    placement?: number | null
+    metric?: number | null
+    score?: number | null
     notes?: string
   }
 ) {
@@ -656,11 +790,26 @@ export async function generateBrackets(categoryId: string) {
 
   if (rawParticipants.length < 2) return
 
-  // Sort participants using weighed weight or student registered weight ascending
+  const getBeltOrder = (rank: string) => {
+    const b = BELT_RANKS.find((r) => r.value === rank)
+    return b ? b.order : 0
+  }
+
+  // Sort participants by multi-criteria composite score (Belt Rank, Weight, and Height) for optimal bracket balance
   const participants = [...rawParticipants].sort((a, b) => {
     const weightA = a.weight && a.weight > 0 ? a.weight : a.student.weight || 0
     const weightB = b.weight && b.weight > 0 ? b.weight : b.student.weight || 0
-    return weightA - weightB
+    const beltA = getBeltOrder(a.student.beltRank)
+    const beltB = getBeltOrder(b.student.beltRank)
+
+    let heightA = a.student.height || 0
+    let heightB = b.student.height || 0
+    if (heightA > 0 && heightA < 3) heightA *= 100
+    if (heightB > 0 && heightB < 3) heightB *= 100
+
+    const scoreA = beltA * 1000 + weightA * 10 + heightA * 0.1
+    const scoreB = beltB * 1000 + weightB * 10 + heightB * 0.1
+    return scoreA - scoreB
   })
 
   if (participants.length < 2) return
@@ -679,7 +828,7 @@ export async function generateBrackets(categoryId: string) {
           athlete1Id: athlete1 ? athlete1.studentId : null,
           athlete2Id: athlete2 ? athlete2.studentId : null,
           isBye: !athlete2,
-          winnerId: !athlete2 && athlete1 ? athlete1.studentId : null,
+          winnerId: null,
         },
       })
     )
@@ -720,25 +869,42 @@ export async function updateBracketMatch(
 }
 
 export async function autoRankMeasurementCategory(categoryId: string) {
-  const participants = await prisma.eventParticipant.findMany({
-    where: {
-      categoryId,
-      metric: { not: null },
-    },
-    orderBy: { metric: "desc" },
+  const category = await prisma.category.findUnique({
+    where: { id: categoryId },
+    include: { modality: true },
   })
 
-  if (participants.length === 0) return
+  if (!category) return
+  const isTimeType = category.modality.type === "TEMPO"
 
-  // Assign ranks & medals considering ties (empates)
+  const allParticipants = await prisma.eventParticipant.findMany({
+    where: { categoryId },
+  })
+
+  const validParticipants = allParticipants.filter(
+    (p) => (p.metric !== null && p.metric !== undefined) || (p.score !== null && p.score !== undefined)
+  )
+
+  if (validParticipants.length === 0) return { count: 0 }
+
+  // Sort: Ascending for time, Descending for height, distance, score
+  validParticipants.sort((a, b) => {
+    const valA = a.metric ?? a.score ?? 0
+    const valB = b.metric ?? b.score ?? 0
+    return isTimeType ? valA - valB : valB - valA
+  })
+
   let currentRank = 1
-  for (let i = 0; i < participants.length; i++) {
-    const p = participants[i]
-    const prev = i > 0 ? participants[i - 1] : null
+  for (let i = 0; i < validParticipants.length; i++) {
+    const p = validParticipants[i]
+    const prev = i > 0 ? validParticipants[i - 1] : null
 
-    // Check tie with previous athlete
-    if (prev && prev.metric === p.metric) {
-      // Tie! Same rank & medal as previous
+    const valP = p.metric ?? p.score ?? 0
+    const valPrev = prev ? (prev.metric ?? prev.score ?? 0) : null
+
+    // Check tie
+    if (prev && valPrev === valP) {
+      // Same rank as prev
     } else if (i > 0) {
       currentRank = i + 1
     }

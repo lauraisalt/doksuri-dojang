@@ -260,7 +260,7 @@ export default async function DashboardPage() {
                       {grad.fromBelt} ➔ <strong className="text-rose-600 dark:text-rose-400">{grad.toBelt}</strong>
                     </div>
                   </div>
-                  <span className="text-[10px] text-slate-400">
+                  <span suppressHydrationWarning className="text-[10px] text-slate-400">
                     {new Date(grad.date).toLocaleDateString("pt-BR")}
                   </span>
                 </div>
