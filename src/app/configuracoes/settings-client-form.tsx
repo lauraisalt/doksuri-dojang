@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { updateSettings, deleteDojangLogo, resetSettings } from "@/lib/db-actions"
-import { Save, Shield, Database, Upload, Trash2, AlertTriangle, RefreshCw, Palette, Check } from "lucide-react"
+import { Save, Shield, Database, Upload, Trash2, AlertTriangle, RefreshCw, Palette, Check, Download, FileSpreadsheet, HardDrive, CheckCircle2 } from "lucide-react"
 
 interface SettingsData {
   academyName?: string
@@ -48,6 +48,26 @@ export function SettingsClientForm({ initialSettings }: Props) {
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [isResetting, setIsResetting] = useState(false)
   const [showConfirmReset, setShowConfirmReset] = useState(false)
+  const [isCreatingBackup, setIsCreatingBackup] = useState(false)
+  const [backupMessage, setBackupMessage] = useState<string | null>(null)
+
+  const handleCreateLocalBackup = async () => {
+    setIsCreatingBackup(true)
+    setBackupMessage(null)
+    try {
+      const res = await fetch("/api/backup", { method: "POST" })
+      const data = await res.json()
+      if (res.ok) {
+        setBackupMessage(`Backup gerado com sucesso: ${data.filename} (${data.totalBackups} armazenados)`)
+      } else {
+        alert(data.error || "Erro ao gerar backup local.")
+      }
+    } catch (err: any) {
+      alert("Erro na requisição de backup: " + err.message)
+    } finally {
+      setIsCreatingBackup(false)
+    }
+  }
 
   // Handle local image file upload (converts file to Base64)
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -326,6 +346,159 @@ export function SettingsClientForm({ initialSettings }: Props) {
             </button>
           </div>
         </form>
+      </div>
+
+      {/* Backup and Data Export Section */}
+      <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800/80 rounded-3xl p-6 shadow-sm dark:shadow-lg space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/20">
+              <HardDrive className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                Central de Backup & Exportação de Dados
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Baixe cópias de segurança do banco SQLite, arquivos completos em JSON ou planilhas CSV por página.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleCreateLocalBackup}
+            disabled={isCreatingBackup}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all shadow-md shadow-emerald-600/20"
+          >
+            <Database className="w-4 h-4" />
+            {isCreatingBackup ? "Gerando Backup..." : "Criar Backup no Servidor"}
+          </button>
+        </div>
+
+        {backupMessage && (
+          <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
+            <span>{backupMessage}</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {/* SQLite DB */}
+          <a
+            href="/api/backup?type=db"
+            download
+            className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all group flex items-start justify-between"
+          >
+            <div className="space-y-1">
+              <span className="font-bold text-xs text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 flex items-center gap-1.5">
+                <Database className="w-4 h-4 text-emerald-500" /> Banco SQLite (.db)
+              </span>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Arquivo bruto `dev.db` com 100% dos dados para restauração rápida.
+              </p>
+            </div>
+            <Download className="w-4 h-4 text-slate-400 group-hover:text-emerald-500 shrink-0 mt-0.5" />
+          </a>
+
+          {/* JSON Full */}
+          <a
+            href="/api/backup?type=json"
+            download
+            className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 hover:border-blue-500/50 hover:bg-blue-500/5 transition-all group flex items-start justify-between"
+          >
+            <div className="space-y-1">
+              <span className="font-bold text-xs text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 flex items-center gap-1.5">
+                <Download className="w-4 h-4 text-blue-500" /> Dados Completos (.json)
+              </span>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Exportação de todas as tabelas e relacionamentos em JSON legível.
+              </p>
+            </div>
+            <Download className="w-4 h-4 text-slate-400 group-hover:text-blue-500 shrink-0 mt-0.5" />
+          </a>
+
+          {/* CSV Alunos */}
+          <a
+            href="/api/backup?type=csv&resource=alunos"
+            download
+            className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 hover:border-rose-500/50 hover:bg-rose-500/5 transition-all group flex items-start justify-between"
+          >
+            <div className="space-y-1">
+              <span className="font-bold text-xs text-slate-900 dark:text-white group-hover:text-rose-600 dark:group-hover:text-rose-400 flex items-center gap-1.5">
+                <FileSpreadsheet className="w-4 h-4 text-rose-500" /> Alunos Cadastrados (.csv)
+              </span>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Planilha com dados cadastrais, graduações, planos e contatos.
+              </p>
+            </div>
+            <Download className="w-4 h-4 text-slate-400 group-hover:text-rose-500 shrink-0 mt-0.5" />
+          </a>
+
+          {/* CSV Pagamentos */}
+          <a
+            href="/api/backup?type=csv&resource=pagamentos"
+            download
+            className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 hover:border-amber-500/50 hover:bg-amber-500/5 transition-all group flex items-start justify-between"
+          >
+            <div className="space-y-1">
+              <span className="font-bold text-xs text-slate-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400 flex items-center gap-1.5">
+                <FileSpreadsheet className="w-4 h-4 text-amber-500" /> Financeiro & Mensalidades (.csv)
+              </span>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Planilha com histórico de pagamentos, vencimentos e status.
+              </p>
+            </div>
+            <Download className="w-4 h-4 text-slate-400 group-hover:text-amber-500 shrink-0 mt-0.5" />
+          </a>
+
+          {/* CSV Torneios */}
+          <a
+            href="/api/backup?type=csv&resource=torneios"
+            download
+            className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 hover:border-violet-500/50 hover:bg-violet-500/5 transition-all group flex items-start justify-between"
+          >
+            <div className="space-y-1">
+              <span className="font-bold text-xs text-slate-900 dark:text-white group-hover:text-violet-600 dark:group-hover:text-violet-400 flex items-center gap-1.5">
+                <FileSpreadsheet className="w-4 h-4 text-violet-500" /> Torneios & Chaves (.csv)
+              </span>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Planilha com resultados, chaves, pódios e medalhas disputadas.
+              </p>
+            </div>
+            <Download className="w-4 h-4 text-slate-400 group-hover:text-violet-500 shrink-0 mt-0.5" />
+          </a>
+
+          {/* CSV Frequência */}
+          <a
+            href="/api/backup?type=csv&resource=frequencia"
+            download
+            className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 hover:border-teal-500/50 hover:bg-teal-500/5 transition-all group flex items-start justify-between"
+          >
+            <div className="space-y-1">
+              <span className="font-bold text-xs text-slate-900 dark:text-white group-hover:text-teal-600 dark:group-hover:text-teal-400 flex items-center gap-1.5">
+                <FileSpreadsheet className="w-4 h-4 text-teal-500" /> Frequências & Presenças (.csv)
+              </span>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Histórico de presenças, faltas e check-ins nas aulas.
+              </p>
+            </div>
+            <Download className="w-4 h-4 text-slate-400 group-hover:text-teal-500 shrink-0 mt-0.5" />
+          </a>
+        </div>
+
+        {/* Routine notice */}
+        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 text-xs space-y-2">
+          <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+            <HardDrive className="w-3.5 h-3.5 text-slate-500" /> Rotina de Backup Automático no Servidor:
+          </span>
+          <p className="text-slate-500 dark:text-slate-400 leading-relaxed text-[11px]">
+            O sistema inclui o script <code className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-mono">scripts/backup-db.js</code> pronto para execução periódica. Para programar um backup diário automático às 23:00 no Linux/Mac, basta adicionar ao crontab:
+          </p>
+          <div className="p-2.5 rounded-xl bg-slate-900 text-slate-200 font-mono text-[11px] select-all overflow-x-auto">
+            0 23 * * * node {typeof window !== "undefined" ? "scripts/backup-db.js" : "scripts/backup-db.js"}
+          </div>
+        </div>
       </div>
 
       {/* Danger Zone / Reset Card */}

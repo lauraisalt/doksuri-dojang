@@ -46,11 +46,15 @@ import {
   removeStudentFromCategory,
   updateParticipant,
   generateBrackets,
+  generateChaveBrackets,
+  saveManualChaves,
+  setChavePlacements,
   swapBracketAthletes,
   updateBracketMatch,
   saveManualBrackets,
   autoRankMeasurementCategory,
 } from "@/lib/db-actions"
+import { calculateAge } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 
 interface Props {
@@ -90,18 +94,28 @@ export function ChampionshipsClientView({ initialEvents, students = [] }: Props)
     categoryName: string
   } | null>(null)
 
-  // Manual Bracket Building State (Requirement 4.3)
+  // Chave Bracket Building State
   const [isManualBracketMode, setIsManualBracketMode] = useState(false)
-  const [manualMatches, setManualMatches] = useState<
-    {
-      id: string
-      round: number
-      position: number
-      athlete1Id: string | null
-      athlete2Id: string | null
-      winnerId: string | null
-    }[]
+  const [bracketCriterion, setBracketCriterion] = useState<"PESO" | "ALTURA" | "IDADE" | "COMBINADO">("PESO")
+  const [maxStudentsPerChave, setMaxStudentsPerChave] = useState<number>(3)
+  const [manualChaves, setManualChaves] = useState<
+    Array<{
+      chaveNumber: number
+      chaveName: string
+      athleteIds: string[]
+      placements?: {
+        firstId?: string | null
+        secondId?: string | null
+        thirdId?: string | null
+      }
+    }>
   >([])
+  const [podiumDrafts, setPodiumDrafts] = useState<
+    Record<number, { firstId?: string | null; secondId?: string | null; thirdId?: string | null }>
+  >({})
+
+  // Event Accordion State (Torneio finalizado fechado por padrão)
+  const [expandedEvents, setExpandedEvents] = useState<Record<string, boolean>>({})
 
   // Event Form State
   const [eventName, setEventName] = useState("")
@@ -215,19 +229,23 @@ export function ChampionshipsClientView({ initialEvents, students = [] }: Props)
     }
   }
 
-  // Category Creation
+  // Category Creation (Sem digitação manual de nome, apenas faixa e gênero)
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!activeModalityIdForCategory || !categoryName) return
+    if (!activeModalityIdForCategory) return
     setIsSubmitting(true)
     try {
+      const beltLabel = categoryBeltRange === "TODAS" ? "Todas as Faixas" : (getBeltInfo(categoryBeltRange)?.label || categoryBeltRange)
+      const genderLabel = categoryGender === "MISTO" ? "Misto" : categoryGender === "MASCULINO" ? "Masculino" : "Feminino"
+      const generatedName = `${beltLabel} - ${genderLabel}`
+
       await createCategory({
         modalityId: activeModalityIdForCategory,
-        name: categoryName,
+        name: generatedName,
         beltRange: categoryBeltRange,
         gender: categoryGender,
-        minAge: Number(categoryMinAge),
-        maxAge: Number(categoryMaxAge),
+        minAge: Number(categoryMinAge) || 0,
+        maxAge: Number(categoryMaxAge) || 99,
       })
       setActiveModalityIdForCategory(null)
       setCategoryName("")
@@ -386,32 +404,216 @@ export function ChampionshipsClientView({ initialEvents, students = [] }: Props)
     }
   }
 
-  // Generate Brackets automatically
-  const handleGenerateBrackets = async (categoryId: string) => {
-    try {
-      await generateBrackets(categoryId)
-      setIsManualBracketMode(false)
-      router.refresh()
-    } catch (err) {
-      console.error(err)
-      alert("Erro ao gerar chave de lutas.")
+  // Helper: Extract Chaves from Category matches and participants
+  const getChavesForCategory = (cat: any) => {
+    if (!cat) return []
+    const participants = cat.participants || []
+    const matches = cat.matches || []
+
+    if (matches.length === 0) return []
+
+    // Group matches by round (which represents chaveNumber)
+    const chavesMap = new Map<
+      number,
+      {
+        chaveNumber: number
+        chaveName: string
+        athleteIds: Set<string>
+        matches: any[]
+        placements: {
+          firstId?: string | null
+          secondId?: string | null
+          thirdId?: string | null
+          fourthId?: string | null
+        }
+      }
+    >()
+
+    for (const m of matches) {
+      const chNum = m.round || 1
+      if (!chavesMap.has(chNum)) {
+        let chaveName = `Chave ${chNum}`
+        const athleteIds = new Set<string>()
+        let placements: any = {}
+        try {
+          if (m.notes && m.notes.startsWith("{")) {
+            const parsed = JSON.parse(m.notes)
+            if (parsed.chaveName) chaveName = parsed.chaveName
+            if (parsed.athleteIds) parsed.athleteIds.forEach((id: string) => athleteIds.add(id))
+            if (parsed.placements) placements = parsed.placements
+          }
+        } catch {}
+
+        chavesMap.set(chNum, {
+          chaveNumber: chNum,
+          chaveName,
+          athleteIds,
+          matches: [],
+          placements,
+        })
+      }
+
+      const chaveObj = chavesMap.get(chNum)!
+      chaveObj.matches.push(m)
+      if (m.athlete1Id) chaveObj.athleteIds.add(m.athlete1Id)
+      if (m.athlete2Id) chaveObj.athleteIds.add(m.athlete2Id)
     }
+
+    return Array.from(chavesMap.values()).map((ch) => {
+      const athleteIdsList = Array.from(ch.athleteIds)
+      const chaveParticipants = participants.filter((p: any) => athleteIdsList.includes(p.studentId))
+
+      const p1 =
+        ch.placements?.firstId ||
+        chaveParticipants.find((p: any) => p.placement === 1 || p.medal === "OURO")?.studentId ||
+        null
+      const p2 =
+        ch.placements?.secondId ||
+        chaveParticipants.find((p: any) => p.placement === 2 || p.medal === "PRATA")?.studentId ||
+        null
+      const p3 =
+        ch.placements?.thirdId ||
+        chaveParticipants.find((p: any) => p.placement === 3 || p.medal === "BRONZE")?.studentId ||
+        null
+
+      return {
+        ...ch,
+        athleteIds: athleteIdsList,
+        athletes: chaveParticipants.map((p: any) => p.student).filter(Boolean),
+        participants: chaveParticipants,
+        placements: { firstId: p1, secondId: p2, thirdId: p3 },
+      }
+    })
+  }
+
+  // Helper: Compute approximate medal count for tournament based on Chaves
+  const computeEventMedals = (event: any) => {
+    let totalGold = 0
+    let totalSilver = 0
+    let totalBronze = 0
+    let totalChaves = 0
+
+    for (const mod of event.modalities || []) {
+      for (const cat of mod.categories || []) {
+        const participants = cat.participants || []
+        if (participants.length === 0) continue
+
+        const matches = cat.matches || []
+        if (matches.length > 0) {
+          const chavesMap = new Map<number, Set<string>>()
+          for (const m of matches) {
+            const chNum = m.round || 1
+            if (!chavesMap.has(chNum)) chavesMap.set(chNum, new Set<string>())
+            if (m.athlete1Id) chavesMap.get(chNum)!.add(m.athlete1Id)
+            if (m.athlete2Id) chavesMap.get(chNum)!.add(m.athlete2Id)
+            try {
+              if (m.notes && m.notes.startsWith("{")) {
+                const parsed = JSON.parse(m.notes)
+                if (parsed.athleteIds) parsed.athleteIds.forEach((id: string) => chavesMap.get(chNum)!.add(id))
+              }
+            } catch {}
+          }
+
+          totalChaves += chavesMap.size
+          chavesMap.forEach((athletesSet) => {
+            const count = athletesSet.size
+            if (count >= 1) totalGold += 1
+            if (count >= 2) totalSilver += 1
+            if (count >= 3) totalBronze += 1
+            if (count >= 4) totalBronze += count - 2
+          })
+        } else {
+          // Estimate with max 3 per chave
+          const estChaves = Math.max(1, Math.ceil(participants.length / 3))
+          totalChaves += estChaves
+          let rem = participants.length
+          for (let i = 0; i < estChaves; i++) {
+            const size = Math.min(3, Math.ceil(rem / (estChaves - i)))
+            rem -= size
+            if (size >= 1) totalGold += 1
+            if (size >= 2) totalSilver += 1
+            if (size >= 3) totalBronze += 1
+          }
+        }
+      }
+    }
+
+    return {
+      chaves: totalChaves,
+      gold: totalGold,
+      silver: totalSilver,
+      bronze: totalBronze,
+      total: totalGold + totalSilver + totalBronze,
+    }
+  }
+
+  // Event Accordion Helpers (Encerrado permanece fechado por padrão)
+  const isEventExpanded = (event: any) => {
+    if (expandedEvents[event.id] !== undefined) {
+      return expandedEvents[event.id]
+    }
+    return event.status !== "FINALIZADO"
+  }
+
+  const toggleEventExpanded = (eventId: string) => {
+    const ev = events.find((e: any) => e.id === eventId)
+    const current = isEventExpanded(ev || { id: eventId, status: "" })
+    setExpandedEvents((prev) => ({
+      ...prev,
+      [eventId]: !current,
+    }))
   }
 
   // Open Brackets Modal
   const handleOpenBracketsModal = (cat: any) => {
     setActiveCategoryForBrackets(cat)
     setIsManualBracketMode(false)
-    // Pre-populate manual matches with existing matches if available
-    const existingMatches = (cat.matches || []).map((m: any) => ({
-      id: m.id,
-      round: m.round,
-      position: m.position,
-      athlete1Id: m.athlete1Id,
-      athlete2Id: m.athlete2Id,
-      winnerId: m.winnerId,
-    }))
-    setManualMatches(existingMatches)
+    setBracketCriterion("PESO")
+    setMaxStudentsPerChave(3)
+
+    const existingChaves = getChavesForCategory(cat)
+    if (existingChaves.length > 0) {
+      setManualChaves(
+        existingChaves.map((ch) => ({
+          chaveNumber: ch.chaveNumber,
+          chaveName: ch.chaveName,
+          athleteIds: ch.athleteIds,
+          placements: ch.placements,
+        }))
+      )
+    } else {
+      setManualChaves([
+        {
+          chaveNumber: 1,
+          chaveName: "Chave 1",
+          athleteIds: [],
+          placements: {},
+        },
+      ])
+    }
+  }
+
+  // Generate Automatic Chaves (com critério peso/altura/idade e max alunos por chave)
+  const handleGenerateChaves = async () => {
+    if (!activeCategoryForBrackets) return
+    setIsSubmitting(true)
+    try {
+      await generateChaveBrackets({
+        categoryId: activeCategoryForBrackets.id,
+        criterion: bracketCriterion,
+        maxPerChave: maxStudentsPerChave,
+      })
+      router.refresh()
+    } catch (err) {
+      console.error(err)
+      alert("Erro ao gerar chaves.")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleGenerateBrackets = async (categoryId: string) => {
+    return handleGenerateChaves()
   }
 
   // Swap Bracket Athletes manually
@@ -436,40 +638,77 @@ export function ChampionshipsClientView({ initialEvents, students = [] }: Props)
     }
   }
 
-  // Add a new confrontation slot in Manual Bracket Mode (Requirement 4.3)
-  const handleAddManualMatchSlot = () => {
-    const newMatch = {
-      id: `manual-${Date.now()}-${Math.random()}`,
-      round: 1,
-      position: manualMatches.length + 1,
-      athlete1Id: null,
-      athlete2Id: null,
-      winnerId: null,
-    }
-    setManualMatches([...manualMatches, newMatch])
+  // Manual Mode handlers
+  const handleAddManualChave = () => {
+    const nextNum = manualChaves.length + 1
+    setManualChaves([
+      ...manualChaves,
+      {
+        chaveNumber: nextNum,
+        chaveName: `Chave ${nextNum}`,
+        athleteIds: [],
+        placements: {},
+      },
+    ])
   }
 
-  // Save Manual Brackets (Requirement 4.3)
-  const handleSaveManualBrackets = async () => {
+  const handleRemoveManualChave = (chaveNum: number) => {
+    const filtered = manualChaves.filter((c) => c.chaveNumber !== chaveNum)
+    setManualChaves(
+      filtered.map((c, idx) => ({
+        ...c,
+        chaveNumber: idx + 1,
+        chaveName: `Chave ${idx + 1}`,
+      }))
+    )
+  }
+
+  const handleAssignAthleteToChave = (studentId: string, targetChaveNum: number | null) => {
+    setManualChaves((prev) =>
+      prev.map((c) => {
+        const without = c.athleteIds.filter((id) => id !== studentId)
+        if (c.chaveNumber === targetChaveNum) {
+          return { ...c, athleteIds: [...without, studentId] }
+        }
+        return { ...c, athleteIds: without }
+      })
+    )
+  }
+
+  const handleSaveManualChaves = async () => {
     if (!activeCategoryForBrackets) return
     setIsSubmitting(true)
     try {
-      await saveManualBrackets(
-        activeCategoryForBrackets.id,
-        manualMatches.map((m, idx) => ({
-          round: 1,
-          position: idx + 1,
-          athlete1Id: m.athlete1Id,
-          athlete2Id: m.athlete2Id,
-          isBye: !m.athlete2Id,
-          winnerId: m.winnerId,
-        }))
-      )
+      await saveManualChaves({
+        categoryId: activeCategoryForBrackets.id,
+        chaves: manualChaves,
+      })
       setIsManualBracketMode(false)
       router.refresh()
     } catch (err) {
       console.error(err)
-      alert("Erro ao salvar chave manual.")
+      alert("Erro ao salvar chaves manuais.")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleSaveChavePodium = async (
+    chaveNumber: number,
+    placements: { firstId?: string | null; secondId?: string | null; thirdId?: string | null }
+  ) => {
+    if (!activeCategoryForBrackets) return
+    setIsSubmitting(true)
+    try {
+      await setChavePlacements({
+        categoryId: activeCategoryForBrackets.id,
+        chaveNumber,
+        placements,
+      })
+      router.refresh()
+    } catch (err) {
+      console.error(err)
+      alert("Erro ao salvar pódio da chave.")
     } finally {
       setIsSubmitting(false)
     }
@@ -565,16 +804,19 @@ export function ChampionshipsClientView({ initialEvents, students = [] }: Props)
         {events.length > 0 ? (
           events.map((event: any) => {
             const statusObj = EVENT_STATUSES.find((s) => s.value === event.status) || EVENT_STATUSES[1]
+            const isFinished = event.status === "FINALIZADO"
+            const expanded = isEventExpanded(event)
+            const medals = computeEventMedals(event)
 
             return (
               <div
                 key={event.id}
-                className="bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800/80 rounded-3xl p-6 shadow-md backdrop-blur-md transition-colors space-y-6"
+                className="bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800/80 rounded-3xl p-6 shadow-md backdrop-blur-md transition-all space-y-4"
               >
                 {/* Event Header */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
                   <div>
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2.5 flex-wrap">
                       <Trophy className="w-6 h-6 text-rose-500 shrink-0" />
                       <h2 className="text-xl font-extrabold text-slate-900 dark:text-white">
                         {event.name}
@@ -582,6 +824,11 @@ export function ChampionshipsClientView({ initialEvents, students = [] }: Props)
                       <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${statusObj.color}`}>
                         {statusObj.label}
                       </span>
+                      {isFinished && !expanded && (
+                        <span className="text-[11px] font-semibold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 rounded-full">
+                          Torneio Encerrado (Fechado)
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600 dark:text-slate-400 mt-1">
@@ -601,7 +848,27 @@ export function ChampionshipsClientView({ initialEvents, students = [] }: Props)
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Expand/Collapse Toggle Button (Requirement 5) */}
+                    <button
+                      onClick={() => toggleEventExpanded(event.id)}
+                      className={`px-3 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all border ${
+                        expanded
+                          ? "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-200"
+                          : "bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-500/20 hover:bg-indigo-100"
+                      }`}
+                    >
+                      {expanded ? (
+                        <>
+                          <ChevronUp className="w-4 h-4" /> Recolher
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="w-4 h-4" /> Expandir Detalhes
+                        </>
+                      )}
+                    </button>
+
                     <button
                       onClick={() => {
                         setActiveEventIdForModality(event.id)
@@ -631,11 +898,42 @@ export function ChampionshipsClientView({ initialEvents, students = [] }: Props)
                   </div>
                 </div>
 
-                {/* Modalities & Categories inside Event */}
-                <div className="space-y-4">
-                  <h3 className="font-bold text-xs uppercase text-slate-400 tracking-wider flex items-center gap-1.5">
-                    <Shield className="w-4 h-4 text-rose-500" /> Modalidades & Categorias
-                  </h3>
+                {/* Approximate Medal Count based on Chaves (Requirement 4) */}
+                <div className="bg-gradient-to-r from-amber-500/10 via-rose-500/10 to-indigo-500/10 border border-amber-500/20 dark:border-amber-500/30 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <Medal className="w-5 h-5 text-amber-500 shrink-0" />
+                    <div>
+                      <span className="font-extrabold text-slate-900 dark:text-white">
+                        Previsão de Medalhas do Torneio:
+                      </span>
+                      <span className="text-slate-500 dark:text-slate-400 ml-1.5">
+                        ({medals.chaves} chave{medals.chaves !== 1 ? "s" : ""} calculada{medals.chaves !== 1 ? "s" : ""})
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 font-bold flex-wrap">
+                    <span className="px-2.5 py-1 rounded-xl bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                      🥇 {medals.gold} Ouro
+                    </span>
+                    <span className="px-2.5 py-1 rounded-xl bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 flex items-center gap-1">
+                      🥈 {medals.silver} Prata
+                    </span>
+                    <span className="px-2.5 py-1 rounded-xl bg-orange-700/15 text-orange-800 dark:text-orange-300 border border-orange-700/30 flex items-center gap-1">
+                      🥉 {medals.bronze} Bronze
+                    </span>
+                    <span className="px-3 py-1 rounded-xl bg-indigo-600 text-white font-extrabold flex items-center gap-1 shadow-xs">
+                      🏆 Total: {medals.total} Medalhas
+                    </span>
+                  </div>
+                </div>
+
+                {/* Modalities & Categories inside Event (Requirement 5: Expandable) */}
+                {expanded ? (
+                  <div className="space-y-4 pt-1">
+                    <h3 className="font-bold text-xs uppercase text-slate-400 tracking-wider flex items-center gap-1.5">
+                      <Shield className="w-4 h-4 text-rose-500" /> Modalidades & Categorias
+                    </h3>
 
                   {event.modalities && event.modalities.length > 0 ? (
                     <div className="space-y-4">
@@ -863,8 +1161,19 @@ export function ChampionshipsClientView({ initialEvents, students = [] }: Props)
                     </p>
                   )}
                 </div>
-              </div>
-            )
+              ) : (
+                <div
+                  onClick={() => toggleEventExpanded(event.id)}
+                  className="p-3 text-center rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-dashed border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors flex items-center justify-center gap-2"
+                >
+                  <ChevronDown className="w-4 h-4 text-slate-400" />
+                  <span>
+                    {isFinished ? "Torneio encerrado mantido fechado para melhor visualização." : "Torneio recolhido."} Clique para expandir detalhes.
+                  </span>
+                </div>
+              )}
+            </div>
+          )
           })
         ) : (
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-12 text-center text-slate-400">
@@ -1191,18 +1500,15 @@ export function ChampionshipsClientView({ initialEvents, students = [] }: Props)
             </div>
 
             <form onSubmit={handleCreateCategory} className="space-y-4 text-xs">
-              <div>
-                <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">
-                  Nome da Categoria *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={categoryName}
-                  onChange={(e) => setCategoryName(e.target.value)}
-                  placeholder="Ex: Faixas Coloridas, Adulto até 75kg, Juvenil"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white"
-                />
+              {/* Category Name auto-generated based on Belt Range and Gender */}
+              <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-rose-500">
+                  Nome Gerado Automaticamente
+                </span>
+                <div className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <Shield className="w-4 h-4 text-rose-500" />
+                  {categoryBeltRange === "TODAS" ? "Todas as Faixas" : (getBeltInfo(categoryBeltRange)?.label || categoryBeltRange)} — {categoryGender === "MISTO" ? "Misto" : categoryGender === "MASCULINO" ? "Masculino" : "Feminino"}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1264,7 +1570,7 @@ export function ChampionshipsClientView({ initialEvents, students = [] }: Props)
       {/* Modal 4: Inscrever Aluno na Categoria com Confirmação Visual Clara (Requirement 4.2) */}
       {activeCategoryForStudent && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-full max-w-lg rounded-3xl p-6 shadow-2xl space-y-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-full max-w-lg rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <div>
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -1308,13 +1614,13 @@ export function ChampionshipsClientView({ initialEvents, students = [] }: Props)
                     <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">
                       Selecione o Aluno do Dojang:
                     </label>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center">
                       <select
                         value={selectedStudentId}
                         onChange={(e) => setSelectedStudentId(e.target.value)}
-                        className="flex-1 px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-semibold"
+                        className="w-full sm:flex-1 min-w-0 px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-semibold text-xs"
                       >
-                        <option value="">-- Selecionar Aluno --</option>
+                        <option value="">-- Selecionar Aluno ({availableStudents.length} disponíveis) --</option>
                         {availableStudents.map((s: any) => (
                           <option key={s.id} value={s.id}>
                             {s.name} — Faixa {getBeltInfo(s.beltRank).label}
@@ -1324,7 +1630,7 @@ export function ChampionshipsClientView({ initialEvents, students = [] }: Props)
                       <button
                         onClick={() => handleRegisterStudent(selectedStudentId)}
                         disabled={!selectedStudentId || isSubmitting}
-                        className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-bold rounded-xl shrink-0 flex items-center gap-1 shadow-xs"
+                        className="w-full sm:w-auto px-4 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-bold rounded-xl shrink-0 flex items-center justify-center gap-1.5 shadow-sm transition-all"
                       >
                         <Check className="w-4 h-4" /> Confirmar Inscrição
                       </button>
@@ -1462,267 +1768,488 @@ export function ChampionshipsClientView({ initialEvents, students = [] }: Props)
         </div>
       )}
 
-      {/* Modal 6: Visualização & Montagem Manual de Chaves (Requirement 4.3: Direto na estrutura, sem lista duplicada) */}
-      {activeCategoryForBrackets && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-full max-w-4xl rounded-3xl p-6 shadow-2xl max-h-[90vh] flex flex-col space-y-4">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-3">
-              <div>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Swords className="w-5 h-5 text-rose-500" />
-                  Estrutura de Chaves — {activeCategoryForBrackets.name}
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {activeCategoryForBrackets.participants?.length || 0} atleta(s) inscritos na categoria
-                </p>
+      {/* Modal 6: Visualização & Montagem de Chaves (Disputa interna na chave de 1º, 2º, 3º lugares) */}
+      {activeCategoryForBrackets && (() => {
+        const categoryParticipants = activeCategoryForBrackets.participants || []
+        const chavesList = getChavesForCategory(activeCategoryForBrackets)
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-full max-w-5xl rounded-3xl p-6 shadow-2xl max-h-[92vh] flex flex-col space-y-4">
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-3">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Swords className="w-5 h-5 text-rose-500" />
+                    Chaves de Disputa — {activeCategoryForBrackets.name}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {categoryParticipants.length} atleta(s) inscritos • Cada chave tem no máximo {maxStudentsPerChave} alunos e disputa 1º, 2º e 3º lugares
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsManualBracketMode(!isManualBracketMode)}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 border transition-all ${
+                      isManualBracketMode
+                        ? "bg-rose-600 text-white border-rose-600 shadow-xs"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-200"
+                    }`}
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                    {isManualBracketMode ? "Ver Chaves / Lutas" : "Montagem Manual"}
+                  </button>
+
+                  <button
+                    onClick={() => setActiveCategoryForBrackets(null)}
+                    className="text-slate-400 hover:text-white p-1"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
 
-              {/* Action Buttons: Auto vs Manual */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleGenerateBrackets(activeCategoryForBrackets.id)}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs"
-                  title="Gerar automaticamente ordenado por peso e faixa"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" /> Gerar Automática (Peso)
-                </button>
-
-                <button
-                  onClick={() => {
-                    setIsManualBracketMode(!isManualBracketMode)
-                    if (!isManualBracketMode && manualMatches.length === 0) {
-                      handleAddManualMatchSlot()
-                    }
-                  }}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 border transition-all ${
-                    isManualBracketMode
-                      ? "bg-rose-600 text-white border-rose-600"
-                      : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-200"
-                  }`}
-                >
-                  <Edit2 className="w-3.5 h-3.5" />
-                  {isManualBracketMode ? "Sair da Edição Manual" : "Montagem Manual"}
-                </button>
-
-                <button onClick={() => setActiveCategoryForBrackets(null)} className="text-slate-400 hover:text-white p-1">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Bracket Structure Container (Direct view of matches, NO duplicate general list per Requirement 4.3) */}
-            <div className="overflow-y-auto space-y-4 flex-1 pr-1">
-              {/* Manual Mode Toolbar */}
-              {isManualBracketMode && (
-                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs">
-                  <div className="font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                    <Edit2 className="w-4 h-4" /> Modo de Montagem Manual Ativo: Distribua os atletas nos confrontos abaixo
+              {/* Automatic Generation Bar */}
+              <div className="p-3.5 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <label className="font-bold text-slate-700 dark:text-slate-300">
+                      Montar com base em:
+                    </label>
+                    <select
+                      value={bracketCriterion}
+                      onChange={(e: any) => setBracketCriterion(e.target.value)}
+                      className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-semibold text-slate-900 dark:text-white text-xs"
+                    >
+                      <option value="PESO">⚖️ Peso (Mais próximos)</option>
+                      <option value="ALTURA">📏 Altura (Mais próximas)</option>
+                      <option value="IDADE">🎂 Idade (Mais próximas)</option>
+                      <option value="COMBINADO">✨ Combinado (Peso + Altura + Idade)</option>
+                    </select>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={handleAddManualMatchSlot}
-                      className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl flex items-center gap-1"
+
+                  <div className="flex items-center gap-1.5">
+                    <label className="font-bold text-slate-700 dark:text-slate-300">
+                      Máx alunos por chave:
+                    </label>
+                    <select
+                      value={maxStudentsPerChave}
+                      onChange={(e) => setMaxStudentsPerChave(Number(e.target.value))}
+                      className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-semibold text-slate-900 dark:text-white text-xs"
                     >
-                      <Plus className="w-3.5 h-3.5" /> Adicionar Confronto
-                    </button>
-                    <button
-                      onClick={handleSaveManualBrackets}
-                      disabled={isSubmitting}
-                      className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl flex items-center gap-1"
-                    >
-                      <Check className="w-3.5 h-3.5" /> {isSubmitting ? "Salvando..." : "Salvar Chave Manual"}
-                    </button>
+                      <option value={2}>2 alunos por chave</option>
+                      <option value={3}>3 alunos por chave (Padrão)</option>
+                      <option value={4}>4 alunos por chave</option>
+                      <option value={5}>5 alunos por chave</option>
+                    </select>
                   </div>
                 </div>
-              )}
 
-              {/* Matches Grid (Direct bracket display with distributed athletes) */}
-              {isManualBracketMode ? (
-                /* Manual Matches Editor */
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {manualMatches.map((m, idx) => {
-                    const athletes = (activeCategoryForBrackets.participants || []).map((p: any) => p.student)
+                <button
+                  onClick={handleGenerateChaves}
+                  disabled={isSubmitting || categoryParticipants.length === 0}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold rounded-xl flex items-center gap-1.5 shadow-sm text-xs transition-all"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  {isSubmitting ? "Gerando..." : "Gerar Chaves Automáticas"}
+                </button>
+              </div>
 
-                    return (
-                      <div
-                        key={m.id}
-                        className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-3 text-xs"
-                      >
-                        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700/60 pb-2 font-bold text-slate-700 dark:text-slate-300">
-                          <span>Confronto #{idx + 1} (Fase Eliminatória)</span>
-                          <button
-                            onClick={() => setManualMatches(manualMatches.filter((item) => item.id !== m.id))}
-                            className="text-slate-400 hover:text-red-500"
-                            title="Remover este confronto"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+              {/* Explanatory Rule Pill */}
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/40 px-3 py-1.5 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                <span>
+                  <strong>Regra do Dojang:</strong> A disputa de 1º, 2º e 3º lugares ocorre exclusivamente entre os alunos da mesma chave (não há cruzamento de uma chave contra outra).
+                </span>
+              </div>
 
-                        {/* Athlete 1 */}
-                        <div>
-                          <label className="text-[11px] font-bold text-rose-500 block mb-1">
-                            Atleta 1 (Canto Vermelho):
-                          </label>
-                          <select
-                            value={m.athlete1Id || ""}
-                            onChange={(e) => {
-                              const val = e.target.value || null
-                              setManualMatches(
-                                manualMatches.map((item) => (item.id === m.id ? { ...item, athlete1Id: val } : item))
-                              )
-                            }}
-                            className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-semibold text-slate-900 dark:text-white"
-                          >
-                            <option value="">-- Selecione o Atleta 1 --</option>
-                            {athletes.map((a: any) => (
-                              <option key={a.id} value={a.id}>
-                                {a.name} (Faixa {getBeltInfo(a.beltRank).label} • {a.weight ? `${a.weight}kg` : "Sem peso"})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="text-center font-black text-[10px] text-slate-400 uppercase">VS</div>
-
-                        {/* Athlete 2 */}
-                        <div>
-                          <label className="text-[11px] font-bold text-blue-500 block mb-1">
-                            Atleta 2 (Canto Azul):
-                          </label>
-                          <select
-                            value={m.athlete2Id || ""}
-                            onChange={(e) => {
-                              const val = e.target.value || null
-                              setManualMatches(
-                                manualMatches.map((item) => (item.id === m.id ? { ...item, athlete2Id: val } : item))
-                              )
-                            }}
-                            className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-semibold text-slate-900 dark:text-white"
-                          >
-                            <option value="">-- W.O / Atleta Isento --</option>
-                            {athletes.map((a: any) => (
-                              <option key={a.id} value={a.id}>
-                                {a.name} (Faixa {getBeltInfo(a.beltRank).label} • {a.weight ? `${a.weight}kg` : "Sem peso"})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+              {/* Modal Body: Manual Mode vs Visual / Fight Mode */}
+              <div className="overflow-y-auto space-y-4 flex-1 pr-1">
+                {isManualBracketMode ? (
+                  /* Manual Mode: Build & move athletes between chaves */
+                  <div className="space-y-4">
+                    <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="font-bold text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
+                        <Edit2 className="w-4 h-4" /> Modo Manual: Defina as chaves e distribua os atletas
                       </div>
-                    )
-                  })}
-                </div>
-              ) : activeCategoryForBrackets.matches && activeCategoryForBrackets.matches.length > 0 ? (
-                /* Generated / Saved Matches Display */
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {activeCategoryForBrackets.matches.map((match: any, index: number) => {
-                    const categoryAthletes = (activeCategoryForBrackets.participants || []).map((p: any) => p.student)
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleAddManualChave}
+                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl flex items-center gap-1"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Adicionar Nova Chave
+                        </button>
+                        <button
+                          onClick={handleSaveManualChaves}
+                          disabled={isSubmitting}
+                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold rounded-xl flex items-center gap-1 shadow-xs"
+                        >
+                          <Check className="w-3.5 h-3.5" /> {isSubmitting ? "Salvando..." : "Salvar Chaves Manuais"}
+                        </button>
+                      </div>
+                    </div>
 
-                    return (
-                      <div
-                        key={match.id}
-                        className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 space-y-3 text-xs"
-                      >
-                        <div className="font-bold text-indigo-600 dark:text-indigo-400 flex items-center justify-between border-b border-slate-200 dark:border-slate-700/60 pb-2">
-                          <span>Confronto #{index + 1}</span>
-                          {match.winnerId && (
-                            <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
-                              <Check className="w-3.5 h-3.5" /> Luta Finalizada
+                    {/* Manual Chaves Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {manualChaves.map((chave) => {
+                        const assignedIds = new Set(chave.athleteIds)
+                        const assignedStudents = chave.athleteIds
+                          .map((id) => categoryParticipants.find((p: any) => p.studentId === id)?.student)
+                          .filter(Boolean)
+
+                        const availableForThisChave = categoryParticipants
+                          .filter((p: any) => !assignedIds.has(p.studentId))
+                          .map((p: any) => p.student)
+                          .filter(Boolean)
+
+                        return (
+                          <div
+                            key={chave.chaveNumber}
+                            className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-3 text-xs"
+                          >
+                            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                                  {chave.chaveName || `Chave ${chave.chaveNumber}`}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  assignedStudents.length > maxStudentsPerChave
+                                    ? "bg-rose-500/15 text-rose-600"
+                                    : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                                }`}>
+                                  {assignedStudents.length} / {maxStudentsPerChave} alunos
+                                </span>
+                              </div>
+
+                              <button
+                                onClick={() => handleRemoveManualChave(chave.chaveNumber)}
+                                className="text-slate-400 hover:text-rose-500 p-1"
+                                title="Excluir Chave"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            {/* Add Athlete Dropdown */}
+                            <div>
+                              <label className="text-[11px] font-bold text-slate-500 block mb-1">
+                                Adicionar Atleta nesta chave:
+                              </label>
+                              <select
+                                value=""
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    handleAssignAthleteToChave(e.target.value, chave.chaveNumber)
+                                  }
+                                }}
+                                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-semibold text-slate-900 dark:text-white"
+                              >
+                                <option value="">-- Selecione para adicionar --</option>
+                                {availableForThisChave.map((st: any) => {
+                                  const age = calculateAge(st.birthDate)
+                                  return (
+                                    <option key={st.id} value={st.id}>
+                                      {st.name} ({getBeltInfo(st.beltRank).label} • {st.weight ? `${st.weight}kg` : "Sem peso"} {age > 0 ? `• ${age}a` : ""})
+                                    </option>
+                                  )
+                                })}
+                              </select>
+                            </div>
+
+                            {/* Assigned Athletes List */}
+                            <div className="space-y-1.5 pt-1">
+                              {assignedStudents.length > 0 ? (
+                                assignedStudents.map((st: any, idx: number) => {
+                                  const belt = getBeltInfo(st.beltRank)
+                                  const age = calculateAge(st.birthDate)
+                                  return (
+                                    <div
+                                      key={st.id}
+                                      className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="font-bold text-slate-400 text-[10px]">#{idx + 1}</span>
+                                        <span
+                                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                                          style={{ backgroundColor: belt.color }}
+                                        />
+                                        <span className="font-bold text-slate-900 dark:text-white truncate">
+                                          {st.name}
+                                        </span>
+                                        <span className="text-slate-400 text-[10px] shrink-0">
+                                          ({st.weight ? `${st.weight}kg` : "s/peso"} • {st.height ? `${st.height}m` : "s/alt"} {age > 0 ? `• ${age}a` : ""})
+                                        </span>
+                                      </div>
+
+                                      <button
+                                        onClick={() => handleAssignAthleteToChave(st.id, null)}
+                                        className="text-slate-400 hover:text-rose-500 p-1 shrink-0"
+                                        title="Remover desta chave"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  )
+                                })
+                              ) : (
+                                <p className="text-slate-400 py-3 text-center text-[11px] border border-dashed border-slate-200 dark:border-slate-700/60 rounded-xl">
+                                  Nenhum atleta nesta chave ainda. Selecione acima para adicionar.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : chavesList.length > 0 ? (
+                  /* Visual & Fight Mode: Show Each Chave independently */
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {chavesList.map((chave) => {
+                      const athletes = chave.athletes || []
+                      const chaveMatches = chave.matches || []
+                      const podium = podiumDrafts[chave.chaveNumber] || chave.placements || {}
+
+                      return (
+                        <div
+                          key={chave.chaveNumber}
+                          className="p-5 rounded-3xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/90 dark:border-slate-700/80 space-y-4 text-xs shadow-sm"
+                        >
+                          {/* Chave Header */}
+                          <div className="flex items-center justify-between pb-3 border-b border-slate-200/70 dark:border-slate-700">
+                            <div className="flex items-center gap-2">
+                              <span className="w-8 h-8 rounded-xl bg-rose-500/15 text-rose-600 dark:text-rose-400 flex items-center justify-center font-black text-sm">
+                                #{chave.chaveNumber}
+                              </span>
+                              <div>
+                                <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                                  {chave.chaveName}
+                                </h4>
+                                <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                                  {athletes.length} atleta(s) disputando 1º, 2º e 3º lugares
+                                </span>
+                              </div>
+                            </div>
+
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/20">
+                              Disputa Interna
                             </span>
+                          </div>
+
+                          {/* Athletes in this Chave */}
+                          <div className="space-y-1.5">
+                            <span className="font-bold text-[10px] uppercase text-slate-400 tracking-wider block">
+                              Atletas da Chave:
+                            </span>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              {athletes.map((st: any) => {
+                                const belt = getBeltInfo(st.beltRank)
+                                const age = calculateAge(st.birthDate)
+                                const participant = chave.participants.find((p: any) => p.studentId === st.id)
+                                const placement = participant?.placement
+
+                                return (
+                                  <div
+                                    key={st.id}
+                                    className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1"
+                                  >
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span
+                                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                                        style={{ backgroundColor: belt.color }}
+                                      />
+                                      {placement && (
+                                        <span className="text-[10px] font-black">
+                                          {placement === 1 ? "🥇 1º" : placement === 2 ? "🥈 2º" : placement === 3 ? "🥉 3º" : `#${placement}`}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="font-bold text-slate-900 dark:text-white truncate" title={st.name}>
+                                      {st.name}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                                      {st.weight ? `${st.weight}kg` : "s/peso"} {age > 0 ? `• ${age}a` : ""}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Round-Robin Matches within this Chave */}
+                          {chaveMatches.length > 0 && (
+                            <div className="space-y-2 pt-2 border-t border-slate-200/70 dark:border-slate-700">
+                              <span className="font-bold text-[10px] uppercase text-slate-400 tracking-wider block">
+                                Confrontos da Chave ({chaveMatches.length}):
+                              </span>
+                              <div className="space-y-2">
+                                {chaveMatches.map((match: any, mIdx: number) => {
+                                  const ath1 = athletes.find((a: any) => a.id === match.athlete1Id)
+                                  const ath2 = athletes.find((a: any) => a.id === match.athlete2Id)
+
+                                  return (
+                                    <div
+                                      key={match.id}
+                                      className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2"
+                                    >
+                                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
+                                        <span>Luta #{mIdx + 1}</span>
+                                        {match.winnerId && (
+                                          <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                                            <Check className="w-3.5 h-3.5" /> Venceu: {athletes.find((a: any) => a.id === match.winnerId)?.name}
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div className="flex items-center justify-between gap-2">
+                                        {/* Fighter 1 */}
+                                        <button
+                                          onClick={() => ath1 && handleSelectWinner(match.id, ath1.id)}
+                                          className={`flex-1 p-2 rounded-xl border text-left font-bold transition-all ${
+                                            match.winnerId === ath1?.id
+                                              ? "bg-rose-500/15 border-rose-500 text-rose-600 dark:text-rose-400 shadow-xs"
+                                              : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-rose-400"
+                                          }`}
+                                        >
+                                          <div className="text-[10px] text-rose-500 uppercase font-black">Canto Vermelho</div>
+                                          <div className="truncate text-xs">{ath1 ? ath1.name : "W.O / Isento"}</div>
+                                        </button>
+
+                                        <span className="font-black text-[10px] text-slate-400 uppercase shrink-0">VS</span>
+
+                                        {/* Fighter 2 */}
+                                        <button
+                                          onClick={() => ath2 && handleSelectWinner(match.id, ath2.id)}
+                                          className={`flex-1 p-2 rounded-xl border text-left font-bold transition-all ${
+                                            match.winnerId === ath2?.id
+                                              ? "bg-blue-500/15 border-blue-500 text-blue-600 dark:text-blue-400 shadow-xs"
+                                              : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-blue-400"
+                                          }`}
+                                        >
+                                          <div className="text-[10px] text-blue-500 uppercase font-black">Canto Azul</div>
+                                          <div className="truncate text-xs">{ath2 ? ath2.name : "W.O / Isento"}</div>
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
                           )}
-                        </div>
 
-                        {/* Athlete 1 Selector & Winner Button */}
-                        <div className="space-y-1">
-                          <label className="text-[11px] font-bold text-rose-500">Atleta 1 (Canto Vermelho)</label>
-                          <div className="flex items-center gap-2">
-                            <select
-                              value={match.athlete1Id || ""}
-                              onChange={(e) =>
-                                handleSwapAthletes(match.id, e.target.value || null, match.athlete2Id)
-                              }
-                              className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-semibold"
-                            >
-                              <option value="">-- W.O / Isento --</option>
-                              {categoryAthletes.map((s: any) => (
-                                <option key={s.id} value={s.id}>
-                                  {s.name} ({getBeltInfo(s.beltRank).label} • {s.weight ? `${s.weight}kg` : ""})
-                                </option>
-                              ))}
-                            </select>
-
-                            {match.athlete1Id && (
+                          {/* Podium Definition for this Chave */}
+                          <div className="pt-2 border-t border-slate-200/70 dark:border-slate-700 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-[10px] uppercase text-slate-400 tracking-wider">
+                                🏆 Pódio da Chave #{chave.chaveNumber} (Medalhas):
+                              </span>
                               <button
-                                onClick={() => handleSelectWinner(match.id, match.athlete1Id)}
-                                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                                  match.winnerId === match.athlete1Id
-                                    ? "bg-emerald-600 text-white shadow-md"
-                                    : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-emerald-600 hover:text-white"
-                                }`}
+                                onClick={() => handleSaveChavePodium(chave.chaveNumber, podium)}
+                                disabled={isSubmitting}
+                                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl flex items-center gap-1 shadow-xs"
                               >
-                                {match.winnerId === match.athlete1Id ? "🏆 Vencedor" : "Venceu"}
+                                <Check className="w-3.5 h-3.5" /> Salvar Pódio
                               </button>
-                            )}
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              {/* 1st Place */}
+                              <div>
+                                <label className="text-[11px] font-bold text-amber-500 block mb-0.5">
+                                  🥇 1º Lugar (Ouro):
+                                </label>
+                                <select
+                                  value={podium.firstId || ""}
+                                  onChange={(e) => {
+                                    const val = e.target.value || null
+                                    setPodiumDrafts((prev) => ({
+                                      ...prev,
+                                      [chave.chaveNumber]: { ...podium, firstId: val },
+                                    }))
+                                  }}
+                                  className="w-full px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-semibold text-slate-900 dark:text-white text-xs"
+                                >
+                                  <option value="">-- Não Definido --</option>
+                                  {athletes.map((a: any) => (
+                                    <option key={a.id} value={a.id}>
+                                      {a.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              {/* 2nd Place */}
+                              <div>
+                                <label className="text-[11px] font-bold text-slate-400 block mb-0.5">
+                                  🥈 2º Lugar (Prata):
+                                </label>
+                                <select
+                                  value={podium.secondId || ""}
+                                  onChange={(e) => {
+                                    const val = e.target.value || null
+                                    setPodiumDrafts((prev) => ({
+                                      ...prev,
+                                      [chave.chaveNumber]: { ...podium, secondId: val },
+                                    }))
+                                  }}
+                                  className="w-full px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-semibold text-slate-900 dark:text-white text-xs"
+                                >
+                                  <option value="">-- Não Definido --</option>
+                                  {athletes.map((a: any) => (
+                                    <option key={a.id} value={a.id}>
+                                      {a.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              {/* 3rd Place */}
+                              <div>
+                                <label className="text-[11px] font-bold text-amber-700 block mb-0.5">
+                                  🥉 3º Lugar (Bronze):
+                                </label>
+                                <select
+                                  value={podium.thirdId || ""}
+                                  onChange={(e) => {
+                                    const val = e.target.value || null
+                                    setPodiumDrafts((prev) => ({
+                                      ...prev,
+                                      [chave.chaveNumber]: { ...podium, thirdId: val },
+                                    }))
+                                  }}
+                                  className="w-full px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-semibold text-slate-900 dark:text-white text-xs"
+                                >
+                                  <option value="">-- Não Definido --</option>
+                                  {athletes.map((a: any) => (
+                                    <option key={a.id} value={a.id}>
+                                      {a.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
                           </div>
                         </div>
-
-                        <div className="text-center font-black text-[10px] text-slate-400 uppercase py-0.5">
-                          VS
-                        </div>
-
-                        {/* Athlete 2 Selector & Winner Button */}
-                        <div className="space-y-1">
-                          <label className="text-[11px] font-bold text-blue-500">Atleta 2 (Canto Azul)</label>
-                          <div className="flex items-center gap-2">
-                            <select
-                              value={match.athlete2Id || ""}
-                              onChange={(e) =>
-                                handleSwapAthletes(match.id, match.athlete1Id, e.target.value || null)
-                              }
-                              className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-semibold"
-                            >
-                              <option value="">-- W.O / Isento --</option>
-                              {categoryAthletes.map((s: any) => (
-                                <option key={s.id} value={s.id}>
-                                  {s.name} ({getBeltInfo(s.beltRank).label} • {s.weight ? `${s.weight}kg` : ""})
-                                </option>
-                              ))}
-                            </select>
-
-                            {match.athlete2Id && (
-                              <button
-                                onClick={() => handleSelectWinner(match.id, match.athlete2Id)}
-                                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                                  match.winnerId === match.athlete2Id
-                                    ? "bg-emerald-600 text-white shadow-md"
-                                    : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-emerald-600 hover:text-white"
-                                }`}
-                              >
-                                {match.winnerId === match.athlete2Id ? "🏆 Vencedor" : "Venceu"}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="p-12 text-center text-slate-400 space-y-3 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl">
-                  <Swords className="w-10 h-10 text-slate-400 mx-auto" />
-                  <p className="font-bold text-slate-700 dark:text-slate-300">
-                    Nenhuma chave montada ainda para esta categoria.
-                  </p>
-                  <p className="text-xs text-slate-500 max-w-md mx-auto">
-                    Clique em <strong>&quot;Gerar Automática (Peso)&quot;</strong> para criar os confrontos balanceados por peso e faixa, ou clique em <strong>&quot;Montagem Manual&quot;</strong> para definir os duelos manualmente.
-                  </p>
-                </div>
-              )}
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="p-12 text-center text-slate-400 space-y-3 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl">
+                    <Swords className="w-10 h-10 text-slate-400 mx-auto" />
+                    <p className="font-bold text-slate-700 dark:text-slate-300">
+                      Nenhuma chave montada ainda para esta categoria.
+                    </p>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      Selecione o critério desejado acima (Peso, Altura ou Idade) e clique em <strong>&quot;Gerar Chaves Automáticas&quot;</strong>, ou clique em <strong>&quot;Montagem Manual&quot;</strong> para criar as chaves e distribuir os alunos manualmente.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

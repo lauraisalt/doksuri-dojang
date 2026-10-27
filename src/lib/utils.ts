@@ -7,12 +7,14 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function calculateAge(birthDate: Date | string): number {
+export function calculateAge(birthDate?: Date | string | null): number {
+  if (!birthDate) return 0
   const date = typeof birthDate === "string" ? parseISO(birthDate) : birthDate
   return differenceInYears(new Date(), date)
 }
 
-export function isMinor(birthDate: Date | string): boolean {
+export function isMinor(birthDate?: Date | string | null): boolean {
+  if (!birthDate) return false
   return calculateAge(birthDate) < 18
 }
 

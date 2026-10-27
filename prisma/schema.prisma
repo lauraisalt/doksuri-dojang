@@ -15,7 +15,7 @@ model Student {
   id        String   @id @default(cuid())
   name      String
   gender    String   // MASCULINO, FEMININO
-  birthDate DateTime
+  birthDate DateTime?
   phone     String   @default("")
   email     String   @default("")
 
