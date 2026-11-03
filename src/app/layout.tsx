@@ -34,15 +34,10 @@ export default async function RootLayout({
 
   return (
     <html lang="pt-BR" data-theme-color={defaultColor} suppressHydrationWarning>
-      <body
-        className="flex h-screen overflow-hidden antialiased bg-slate-50 dark:bg-[#090d16] text-slate-900 dark:text-slate-100 transition-colors duration-200"
-        suppressHydrationWarning
-      >
-        <Script
-          id="theme-initializer"
-          strategy="beforeInteractive"
-          dangerouslySetInnerHTML={{ __html: themeScript }}
-        />
+      <body>
+        <Script id="theme-initializer" strategy="beforeInteractive">
+          {themeScript}
+        </Script>
         <Sidebar />
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50 dark:bg-[#090d16] transition-colors duration-200">
           <Header />
