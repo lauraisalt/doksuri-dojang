@@ -198,8 +198,8 @@ export default async function DashboardPage() {
 
             {stats.birthdayStudents.length > 0 ? (
               <div className="space-y-3">
-                {stats.birthdayStudents.map((student: { id: string; name: string; birthDate: Date; beltRank: string; phone?: string }) => {
-                  const day = new Date(student.birthDate).getDate()
+                {stats.birthdayStudents.map((student: { id: string; name: string; birthDate: Date | null; beltRank: string; phone?: string }) => {
+                  const day = student.birthDate ? new Date(student.birthDate).getDate() : "-"
                   const phoneClean = student.phone?.replace(/\D/g, "")
                   const whatsappUrl = phoneClean
                     ? `https://wa.me/55${phoneClean}?text=Parab%C3%A9ns%20${encodeURIComponent(
@@ -260,7 +260,7 @@ export default async function DashboardPage() {
                       {grad.fromBelt} ➔ <strong className="text-rose-600 dark:text-rose-400">{grad.toBelt}</strong>
                     </div>
                   </div>
-                  <span className="text-[10px] text-slate-400">
+                  <span suppressHydrationWarning className="text-[10px] text-slate-400">
                     {new Date(grad.date).toLocaleDateString("pt-BR")}
                   </span>
                 </div>

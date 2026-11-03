@@ -11,8 +11,20 @@ export function Header() {
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [theme, setTheme] = useState<"light" | "dark">("dark")
+  const [mounted, setMounted] = useState(false)
+  const [todayDateStr, setTodayDateStr] = useState("")
 
   useEffect(() => {
+    setMounted(true)
+    setTodayDateStr(
+      new Date().toLocaleDateString("pt-BR", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })
+    )
+
     const savedTheme = localStorage.getItem("dojang_theme") as "light" | "dark" | null
     if (savedTheme) {
       setTheme(savedTheme)
@@ -70,13 +82,6 @@ export function Header() {
     return () => clearTimeout(timer)
   }, [searchTerm])
 
-  const todayDateStr = new Date().toLocaleDateString("pt-BR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  })
-
   return (
     <header className="sticky top-0 z-20 h-16 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-b border-slate-200/80 dark:border-slate-800/80 px-6 flex items-center justify-between gap-4 transition-colors duration-200">
       {/* Search Bar Container */}
@@ -126,7 +131,7 @@ export function Header() {
               </div>
             ) : (
               <div className="p-4 text-center text-sm text-slate-500 dark:text-slate-400">
-                Nenhum aluno encontrado para "{searchTerm}"
+                Nenhum aluno encontrado para &quot;{searchTerm}&quot;
               </div>
             )}
           </div>
@@ -136,7 +141,10 @@ export function Header() {
       {/* Right Controls */}
       <div className="flex items-center gap-3">
         {/* Date Display */}
-        <span className="hidden md:inline-block text-xs font-medium text-slate-500 dark:text-slate-400 capitalize">
+        <span
+          suppressHydrationWarning
+          className="hidden md:inline-block text-xs font-medium text-slate-500 dark:text-slate-400 capitalize"
+        >
           {todayDateStr}
         </span>
 
@@ -144,9 +152,13 @@ export function Header() {
         <button
           onClick={toggleTheme}
           className="p-2.5 rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-          title={`Tema atual: ${theme === "dark" ? "Escuro" : "Claro"}. Clique para alternar.`}
+          title={mounted ? `Tema atual: ${theme === "dark" ? "Escuro" : "Claro"}. Clique para alternar.` : "Alternar tema"}
         >
-          {theme === "dark" ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-slate-600" />}
+          {mounted ? (
+            theme === "dark" ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-slate-600" />
+          ) : (
+            <div className="w-5 h-5" />
+          )}
         </button>
 
         {/* Quick Add Student Button */}

@@ -1,10 +1,13 @@
-import { getSchedules } from "@/lib/db-actions"
+import { getSchedules, getStudents } from "@/lib/db-actions"
 import { SchedulesClientView } from "./schedules-client-view"
 
 export const revalidate = 0
 
 export default async function HorariosPage() {
-  const schedules = await getSchedules()
+  const [schedules, students] = await Promise.all([
+    getSchedules(),
+    getStudents(),
+  ])
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-12">
@@ -20,7 +23,7 @@ export default async function HorariosPage() {
         </div>
       </div>
 
-      <SchedulesClientView initialSchedules={schedules} />
+      <SchedulesClientView initialSchedules={schedules} students={students} />
     </div>
   )
 }

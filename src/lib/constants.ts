@@ -29,6 +29,14 @@ export function getBeltInfo(rank: string) {
   return BELT_RANKS.find(b => b.value === rank) || BELT_RANKS[0]
 }
 
+export function isBeltAtLeast(studentBelt: string, requiredBelt: string): boolean {
+  if (!requiredBelt || requiredBelt === "TODAS" || requiredBelt === "ALL") return true
+  const minBeltKey = requiredBelt.split("-")[0].trim()
+  const reqInfo = BELT_RANKS.find(b => b.value === minBeltKey || b.value === requiredBelt) || getBeltInfo(requiredBelt)
+  const studentInfo = getBeltInfo(studentBelt)
+  return studentInfo.order >= reqInfo.order
+}
+
 // ─── Status do Aluno ─────────────────────────────────────
 
 export const STUDENT_STATUS = [
@@ -87,13 +95,129 @@ export function getDayShort(day: string): string {
   return DAYS_OF_WEEK.find(d => d.value === day)?.short || day
 }
 
+// ─── Tamanhos de Faixa ───────────────────────────────────
+
+export const BELT_SIZES = [
+  { value: "TAMANHO_1", label: "Tamanho 1 (2,20m — Infantil)", short: "T1 (2.20m)" },
+  { value: "TAMANHO_2", label: "Tamanho 2 (2,40m — Juvenil / P)", short: "T2 (2.40m)" },
+  { value: "TAMANHO_3", label: "Tamanho 3 (2,60m — Adulto / M)", short: "T3 (2.60m)" },
+  { value: "TAMANHO_4", label: "Tamanho 4 (2,80m — Adulto / G)", short: "T4 (2.80m)" },
+  { value: "TAMANHO_5", label: "Tamanho 5 (3,00m — Adulto / GG)", short: "T5 (3.00m)" },
+  { value: "TAMANHO_6", label: "Tamanho 6 (3,20m — Extra Grande)", short: "T6 (3.20m)" },
+] as const
+
+export function getBeltSizeLabel(size?: string): string {
+  if (!size) return "Não informado"
+  const found = BELT_SIZES.find((s) => s.value === size || s.label === size)
+  return found ? found.label : size
+}
+
 // ─── Tipo de Modalidade ──────────────────────────────────
 
 export const MODALITY_TYPES = [
-  { value: "COMBATE", label: "Combate" },
-  { value: "MEDICAO", label: "Medição" },
-  { value: "PONTUACAO", label: "Pontuação" },
+  { value: "COMBATE", label: "🥊 Luta / Combate (Chave de Lutas)", unit: "pts", desc: "Chave eliminatória de lutas com pontuação e vencedor" },
+  { value: "CHUTE_ALTURA", label: "🦶 Chute em Altura (Medição única em Metros - m)", unit: "m", desc: "Medição de altura máxima do chute (ex: 2.15 m)" },
+  { value: "SALTO_ALTURA", label: "⬆️ Salto em Altura (Medição em Metros - m)", unit: "m", desc: "Medição de altura do salto (ex: 1.80 m)" },
+  { value: "SALTO_DISTANCIA", label: "🏃 Salto em Distância (Medição em Metros - m)", unit: "m", desc: "Medição de distância do salto (ex: 2.45 m)" },
+  { value: "ARMAS_SANG_DCHALGON", label: "🥢 Armas — Sang Dchalgon (Nunchaku - Notas)", unit: "pts", desc: "Avaliação técnica de manejo de Sang Dchalgon (0 a 10 pts)" },
+  { value: "ARMAS_ESPADA_COREANA", label: "⚔️ Armas — Espada Coreana (Geomdo - Notas)", unit: "pts", desc: "Avaliação técnica com espada coreana (0 a 10 pts)" },
+  { value: "APRESENTACAO_ENSAIADA", label: "🎭 Apresentação Ensaiada (Defesa Pessoal - Notas)", unit: "pts", desc: "Demonstração e apresentação coreografada (0 a 10 pts)" },
+  { value: "PONTUACAO", label: "🥋 Formas / Hyung / Poomsae (Notas de 0 a 10)", unit: "pts", desc: "Avaliação técnica por pontuação (ex: 9.75 pts)" },
+  { value: "TEMPO", label: "⏱️ Tempo / Cronômetro (Segundos - s)", unit: "s", desc: "Cronometragem de velocidade (ex: 12.30 s)" },
 ] as const
+
+export function getModalityMetricLabel(type?: string): { name: string; unit: string; placeholder: string; isTime?: boolean; isCombate?: boolean } {
+  switch (type) {
+    case "CHUTE_ALTURA":
+      return { name: "Altura do Chute (Metros)", unit: "m", placeholder: "Ex: 2.15 (em metros)", isTime: false }
+    case "SALTO_ALTURA":
+      return { name: "Altura do Salto (Metros)", unit: "m", placeholder: "Ex: 1.80 (em metros)", isTime: false }
+    case "SALTO_DISTANCIA":
+      return { name: "Distância do Salto (Metros)", unit: "m", placeholder: "Ex: 2.45 (em metros)", isTime: false }
+    case "ARMAS_SANG_DCHALGON":
+      return { name: "Nota Sang Dchalgon (0 a 10)", unit: "pts", placeholder: "Ex: 9.8 (nota)", isTime: false }
+    case "ARMAS_ESPADA_COREANA":
+      return { name: "Nota Espada Coreana (0 a 10)", unit: "pts", placeholder: "Ex: 9.6 (nota)", isTime: false }
+    case "APRESENTACAO_ENSAIADA":
+      return { name: "Nota Apresentação Ensaiada (0 a 10)", unit: "pts", placeholder: "Ex: 9.9 (nota)", isTime: false }
+    case "MEDICAO_ALTURA":
+      return { name: "Altura Atingida (Metros)", unit: "m", placeholder: "Ex: 2.10 (em metros)", isTime: false }
+    case "MEDICAO_DISTANCIA":
+    case "MEDICAO":
+      return { name: "Distância / Marca (Metros)", unit: "m", placeholder: "Ex: 2.45 (em metros)", isTime: false }
+    case "PONTUACAO":
+      return { name: "Nota / Pontuação (0 a 10)", unit: "pts", placeholder: "Ex: 9.75 (nota)", isTime: false }
+    case "TEMPO":
+      return { name: "Tempo Registrado (Segundos)", unit: "s", placeholder: "Ex: 14.50 (em segundos)", isTime: true }
+    case "COMBATE":
+      return { name: "Pontos de Luta / Placar", unit: "pts", placeholder: "Ex: 12", isCombate: true }
+    default:
+      return { name: "Métrica / Resultado", unit: "m", placeholder: "Ex: 2.50" }
+  }
+}
+
+export function computeSmartPairings(participants: any[]) {
+  if (!participants || participants.length < 2) return []
+
+  const getBeltOrder = (rank: string) => {
+    const b = BELT_RANKS.find((r) => r.value === rank)
+    return b ? b.order : 0
+  }
+
+  // Sort by composite key for closest belt, weight, height
+  const sorted = [...participants].sort((a, b) => {
+    const wA = a.weight && a.weight > 0 ? a.weight : a.student?.weight || 0
+    const wB = b.weight && b.weight > 0 ? b.weight : b.student?.weight || 0
+    const bA = getBeltOrder(a.student?.beltRank || "")
+    const bB = getBeltOrder(b.student?.beltRank || "")
+    let hA = a.student?.height || 0
+    let hB = b.student?.height || 0
+    if (hA > 0 && hA < 3) hA *= 100
+    if (hB > 0 && hB < 3) hB *= 100
+
+    const scoreA = bA * 1000 + wA * 10 + hA * 0.1
+    const scoreB = bB * 1000 + wB * 10 + hB * 0.1
+    return scoreA - scoreB
+  })
+
+  const pairings: any[] = []
+  for (let i = 0; i < sorted.length; i += 2) {
+    const a1 = sorted[i]
+    const a2 = sorted[i + 1]
+
+    if (!a2) {
+      pairings.push({
+        athlete1: a1,
+        athlete2: null,
+        info: "Atleta Isento / W.O (avança automaticamente)",
+        badge: "W.O",
+      })
+    } else {
+      const w1 = a1.weight && a1.weight > 0 ? a1.weight : a1.student?.weight || 0
+      const w2 = a2.weight && a2.weight > 0 ? a2.weight : a2.student?.weight || 0
+      const diffW = Math.abs(w1 - w2).toFixed(1)
+
+      let h1 = a1.student?.height || 0
+      let h2 = a2.student?.height || 0
+      if (h1 > 0 && h1 < 3) h1 *= 100
+      if (h2 > 0 && h2 < 3) h2 *= 100
+      const diffH = h1 > 0 && h2 > 0 ? `${Math.abs(h1 - h2).toFixed(0)}cm` : "N/I"
+
+      const b1 = getBeltInfo(a1.student?.beltRank).label
+      const b2 = getBeltInfo(a2.student?.beltRank).label
+      const isSameBelt = a1.student?.beltRank === a2.student?.beltRank
+
+      pairings.push({
+        athlete1: a1,
+        athlete2: a2,
+        info: `${isSameBelt ? `Faixa ${b1}` : `${b1} vs ${b2}`} • Dif: ${diffW}kg / ${diffH}`,
+        badge: Number(diffW) <= 3 && Math.abs(h1 - h2) <= 10 ? "⭐⭐⭐⭐⭐ Equilíbrio Ideal" : "⭐⭐⭐⭐ Bom Equilíbrio",
+      })
+    }
+  }
+
+  return pairings
+}
 
 // ─── Medalhas ────────────────────────────────────────────
 

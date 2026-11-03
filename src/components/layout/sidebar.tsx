@@ -13,7 +13,7 @@ import {
   ChevronRight,
   Shield,
 } from "lucide-react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
 const navItems = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -28,6 +28,22 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
+  const [settings, setSettings] = useState<{ logoUrl?: string; academyName?: string } | null>(null)
+
+  useEffect(() => {
+    async function loadSettings() {
+      try {
+        const res = await fetch("/api/settings")
+        if (res.ok) {
+          const data = await res.json()
+          setSettings(data)
+        }
+      } catch (e) {
+        console.error("Erro ao carregar logo do sidebar", e)
+      }
+    }
+    loadSettings()
+  }, [])
 
   return (
     <aside
@@ -37,16 +53,22 @@ export function Sidebar() {
     >
       {/* Brand Header */}
       <div className="flex items-center gap-3 p-4 border-b border-slate-200 dark:border-slate-800/80">
-        <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-600 via-red-500 to-amber-500 text-white shadow-lg shadow-rose-600/25 shrink-0">
-          <Shield className="w-6 h-6" />
+        <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-600 via-red-500 to-amber-500 text-white shadow-lg shadow-rose-600/25 shrink-0 overflow-hidden border border-rose-500/20">
+          {settings?.logoUrl ? (
+            <img src={settings.logoUrl} alt="Logo Dojang" className="w-full h-full object-cover" />
+          ) : (
+            <Shield className="w-6 h-6" />
+          )}
         </div>
         {!collapsed && (
           <div className="overflow-hidden">
-            <h1 className="font-bold text-slate-900 dark:text-white text-base leading-tight truncate">
-              Dok Su Ri
+            <h1 className="font-bold text-slate-900 dark:text-white text-sm leading-tight truncate">
+              {settings?.academyName ? settings.academyName.split("-")[0].trim() : "Dok Su Ri"}
             </h1>
-            <p className="text-xs font-semibold text-rose-600 dark:text-rose-400 tracking-wide uppercase">
-              Hapkido Dojang
+            <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 tracking-wide uppercase truncate">
+              {settings?.academyName && settings.academyName.includes("-")
+                ? settings.academyName.split("-").slice(1).join("-").trim()
+                : "Hapkido Dojang"}
             </p>
           </div>
         )}

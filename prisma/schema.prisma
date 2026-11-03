@@ -15,7 +15,7 @@ model Student {
   id        String   @id @default(cuid())
   name      String
   gender    String   // MASCULINO, FEMININO
-  birthDate DateTime
+  birthDate DateTime?
   phone     String   @default("")
   email     String   @default("")
 
@@ -38,6 +38,7 @@ model Student {
 
   // Academia
   beltRank       String   // BRANCA, AMARELA, LARANJA, VERDE, AZUL, VERMELHA, MARROM, PRETA_1DAN...
+  beltSize       String   @default("") // Tamanho da faixa (ex: Tamanho 1, 2, 3...)
   weight         Float?   @default(0)
   height         Float?   @default(0)
   lastGraduation DateTime?
@@ -75,6 +76,7 @@ model Schedule {
   dayOfWeek   String // SEGUNDA, TERCA, QUARTA, QUINTA, SEXTA, SABADO
   time        String // "19:00", "20:00"
   maxCapacity Int    @default(30)
+  description String @default("") // Descrição da aula (ex: Turma Infantil, Treino Avançado)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -159,6 +161,7 @@ model GraduationHistory {
   fromBelt  String
   toBelt    String
   date      DateTime
+  location  String   @default("") // Local onde ocorreu a graduação
   notes     String   @default("")
 
   createdAt DateTime @default(now())
@@ -261,6 +264,8 @@ model BracketMatch {
 model Settings {
   id                    String @id @default("default")
   academyName           String @default("Instituto Dok Su Ri - Unidade 3")
+  logoUrl               String @default("")
+  primaryColor          String @default("rose")
   defaultMonthlyFee     Float  @default(150)
   defaultGympassValue   Float  @default(8)
   defaultDueDay         Int    @default(10)

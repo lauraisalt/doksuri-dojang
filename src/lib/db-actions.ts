@@ -2,6 +2,8 @@
 
 import { prisma } from "./prisma"
 import { revalidatePath } from "next/cache"
+import { BELT_RANKS } from "./constants"
+import { calculateAge } from "./utils"
 
 // ─── Settings ───────────────────────────────────────────────────────────────
 
@@ -23,6 +25,8 @@ export async function getSettings() {
 
 export async function updateSettings(data: {
   academyName: string
+  logoUrl?: string
+  primaryColor?: string
   defaultMonthlyFee: number
   defaultGympassValue: number
   defaultDueDay: number
@@ -31,6 +35,40 @@ export async function updateSettings(data: {
     where: { id: "default" },
     update: data,
     create: { id: "default", ...data },
+  })
+  revalidatePath("/")
+  return updated
+}
+
+export async function deleteDojangLogo() {
+  const updated = await prisma.settings.update({
+    where: { id: "default" },
+    data: { logoUrl: "" },
+  })
+  revalidatePath("/")
+  return updated
+}
+
+export async function resetSettings() {
+  const updated = await prisma.settings.upsert({
+    where: { id: "default" },
+    update: {
+      academyName: "Instituto Dok Su Ri - Unidade 3",
+      logoUrl: "",
+      primaryColor: "rose",
+      defaultMonthlyFee: 150.0,
+      defaultGympassValue: 8.5,
+      defaultDueDay: 10,
+    },
+    create: {
+      id: "default",
+      academyName: "Instituto Dok Su Ri - Unidade 3",
+      logoUrl: "",
+      primaryColor: "rose",
+      defaultMonthlyFee: 150.0,
+      defaultGympassValue: 8.5,
+      defaultDueDay: 10,
+    },
   })
   revalidatePath("/")
   return updated
@@ -106,7 +144,8 @@ export async function getDashboardStats() {
     select: { id: true, name: true, birthDate: true, beltRank: true, phone: true },
   })
 
-  const birthdayStudents = allStudents.filter((s: { birthDate: Date }) => {
+  const birthdayStudents = allStudents.filter((s: { birthDate: Date | null }) => {
+    if (!s.birthDate) return false
     const bMonth = new Date(s.birthDate).getMonth() + 1
     return bMonth === currentMonth
   })
@@ -187,7 +226,6 @@ export async function getStudents(query?: string, status?: string, beltRank?: st
         include: { schedule: true },
       },
       payments: {
-        take: 5,
         orderBy: [{ year: "desc" }, { month: "desc" }],
       },
       checkins: {
@@ -252,9 +290,10 @@ export async function getStudentById(id: string) {
 export async function createStudent(data: {
   name: string
   gender: string
-  birthDate: Date
+  birthDate?: Date | null
   phone?: string
   email?: string
+  beltSize?: string
   guardianName?: string
   guardianPhone?: string
   fatherName?: string
@@ -294,6 +333,7 @@ export async function createStudent(data: {
   }
 
   revalidatePath("/alunos")
+  revalidatePath("/horarios")
   revalidatePath("/")
   return student
 }
@@ -323,6 +363,7 @@ export async function updateStudent(
 
   revalidatePath(`/alunos/${id}`)
   revalidatePath("/alunos")
+  revalidatePath("/horarios")
   revalidatePath("/")
   return student
 }
@@ -330,6 +371,7 @@ export async function updateStudent(
 export async function deleteStudent(id: string) {
   await prisma.student.delete({ where: { id } })
   revalidatePath("/alunos")
+  revalidatePath("/horarios")
   revalidatePath("/")
 }
 
@@ -340,9 +382,19 @@ export async function addGraduation(data: {
   fromBelt: string
   toBelt: string
   date: Date
+  location?: string
   notes?: string
 }) {
-  const grad = await prisma.graduationHistory.create({ data })
+  const grad = await prisma.graduationHistory.create({
+    data: {
+      studentId: data.studentId,
+      fromBelt: data.fromBelt,
+      toBelt: data.toBelt,
+      date: data.date,
+      location: data.location || "",
+      notes: data.notes || "",
+    },
+  })
   await prisma.student.update({
     where: { id: data.studentId },
     data: { beltRank: data.toBelt, lastGraduation: data.date },
@@ -369,10 +421,50 @@ export async function createSchedule(data: {
   dayOfWeek: string
   time: string
   maxCapacity?: number
+  description?: string
 }) {
   const schedule = await prisma.schedule.create({ data })
   revalidatePath("/horarios")
   return schedule
+}
+
+export async function updateSchedule(
+  id: string,
+  data: {
+    dayOfWeek: string
+    time: string
+    maxCapacity?: number
+    description?: string
+  }
+) {
+  const updated = await prisma.schedule.update({
+    where: { id },
+    data,
+  })
+  revalidatePath("/horarios")
+  return updated
+}
+
+export async function enrollStudentInSchedule(studentId: string, scheduleId: string) {
+  const result = await prisma.studentSchedule.upsert({
+    where: {
+      studentId_scheduleId: { studentId, scheduleId },
+    },
+    create: { studentId, scheduleId },
+    update: {},
+  })
+  revalidatePath("/horarios")
+  revalidatePath("/alunos")
+  return result
+}
+
+export async function unenrollStudentFromSchedule(studentId: string, scheduleId: string) {
+  const result = await prisma.studentSchedule.deleteMany({
+    where: { studentId, scheduleId },
+  })
+  revalidatePath("/horarios")
+  revalidatePath("/alunos")
+  return result
 }
 
 // ─── Attendance ──────────────────────────────────────────────────────────────
@@ -540,6 +632,11 @@ export async function createModality(data: { eventId: string; name: string; type
   return modality
 }
 
+export async function deleteModality(id: string) {
+  await prisma.modality.delete({ where: { id } })
+  revalidatePath("/campeonatos")
+}
+
 export async function createCategory(data: {
   modalityId: string
   name: string
@@ -551,6 +648,11 @@ export async function createCategory(data: {
   const category = await prisma.category.create({ data })
   revalidatePath("/campeonatos")
   return category
+}
+
+export async function deleteCategory(id: string) {
+  await prisma.category.delete({ where: { id } })
+  revalidatePath("/campeonatos")
 }
 
 export async function registerStudentInCategory(data: {
@@ -588,9 +690,43 @@ export async function registerStudentInCategory(data: {
       weight: initialWeight,
       notes: data.notes ?? "",
     },
+    include: {
+      student: true,
+      category: true,
+    },
   })
   revalidatePath("/campeonatos")
   return participant
+}
+
+export async function saveManualBrackets(
+  categoryId: string,
+  matches: {
+    round: number
+    position: number
+    athlete1Id?: string | null
+    athlete2Id?: string | null
+    isBye?: boolean
+    winnerId?: string | null
+  }[]
+) {
+  await prisma.bracketMatch.deleteMany({ where: { categoryId } })
+
+  if (matches.length > 0) {
+    await prisma.bracketMatch.createMany({
+      data: matches.map((m) => ({
+        categoryId,
+        round: m.round,
+        position: m.position,
+        athlete1Id: m.athlete1Id || null,
+        athlete2Id: m.athlete2Id || null,
+        isBye: m.isBye ?? (!m.athlete2Id),
+        winnerId: m.winnerId || (!m.athlete2Id && m.athlete1Id ? m.athlete1Id : null),
+      })),
+    })
+  }
+
+  revalidatePath("/campeonatos")
 }
 
 export async function removeStudentFromCategory(categoryId: string, studentId: string) {
@@ -630,11 +766,11 @@ export async function updateParticipant(
   data: {
     paidRegistration?: boolean
     amountPaid?: number
-    weight?: number
-    medal?: string
-    placement?: number
-    metric?: number
-    score?: number
+    weight?: number | null
+    medal?: string | null
+    placement?: number | null
+    metric?: number | null
+    score?: number | null
     notes?: string
   }
 ) {
@@ -646,7 +782,13 @@ export async function updateParticipant(
   return updated
 }
 
-export async function generateBrackets(categoryId: string) {
+export async function generateChaveBrackets(data: {
+  categoryId: string
+  criterion?: "PESO" | "ALTURA" | "IDADE" | "COMBINADO"
+  maxPerChave?: number
+}) {
+  const { categoryId, criterion = "PESO", maxPerChave = 3 } = data
+
   await prisma.bracketMatch.deleteMany({ where: { categoryId } })
 
   const rawParticipants = await prisma.eventParticipant.findMany({
@@ -654,39 +796,352 @@ export async function generateBrackets(categoryId: string) {
     include: { student: true },
   })
 
-  if (rawParticipants.length < 2) return
+  if (rawParticipants.length === 0) return
 
-  // Sort participants using weighed weight or student registered weight ascending
+  const getBeltOrder = (rank: string) => {
+    const b = BELT_RANKS.find((r) => r.value === rank)
+    return b ? b.order : 0
+  }
+
+  // Sort participants by chosen criterion
   const participants = [...rawParticipants].sort((a, b) => {
     const weightA = a.weight && a.weight > 0 ? a.weight : a.student.weight || 0
     const weightB = b.weight && b.weight > 0 ? b.weight : b.student.weight || 0
-    return weightA - weightB
+
+    let heightA = a.student.height || 0
+    let heightB = b.student.height || 0
+    if (heightA > 0 && heightA < 3) heightA *= 100
+    if (heightB > 0 && heightB < 3) heightB *= 100
+
+    const ageA = calculateAge(a.student.birthDate)
+    const ageB = calculateAge(b.student.birthDate)
+
+    const beltA = getBeltOrder(a.student.beltRank)
+    const beltB = getBeltOrder(b.student.beltRank)
+
+    if (criterion === "PESO") {
+      if (weightA !== weightB) return weightA - weightB
+      if (ageA !== ageB) return ageA - ageB
+      return beltA - beltB
+    }
+
+    if (criterion === "ALTURA") {
+      if (heightA !== heightB) return heightA - heightB
+      if (weightA !== weightB) return weightA - weightB
+      return beltA - beltB
+    }
+
+    if (criterion === "IDADE") {
+      if (ageA !== ageB) return ageA - ageB
+      if (weightA !== weightB) return weightA - weightB
+      return beltA - beltB
+    }
+
+    // COMBINADO: Composite score
+    const scoreA = beltA * 1000 + weightA * 10 + heightA * 0.1 + ageA * 5
+    const scoreB = beltB * 1000 + weightB * 10 + heightB * 0.1 + ageB * 5
+    return scoreA - scoreB
   })
 
-  if (participants.length < 2) return
+  // Group into chaves of at most maxPerChave (default 3)
+  const maxLimit = Math.max(2, maxPerChave)
+  const numChaves = Math.max(1, Math.ceil(participants.length / maxLimit))
 
-  const matchPromises = []
-  for (let i = 0; i < participants.length; i += 2) {
-    const athlete1 = participants[i]
-    const athlete2 = participants[i + 1]
+  // Distribute athletes into chaves evenly
+  const chaves: (typeof participants)[] = Array.from({ length: numChaves }, () => [])
 
-    matchPromises.push(
-      prisma.bracketMatch.create({
-        data: {
-          categoryId,
-          round: 1,
-          position: Math.floor(i / 2) + 1,
-          athlete1Id: athlete1 ? athlete1.studentId : null,
-          athlete2Id: athlete2 ? athlete2.studentId : null,
-          isBye: !athlete2,
-          winnerId: !athlete2 && athlete1 ? athlete1.studentId : null,
-        },
-      })
-    )
+  let athleteIndex = 0
+  for (let c = 0; c < numChaves; c++) {
+    const remainingAthletes = participants.length - athleteIndex
+    const remainingChaves = numChaves - c
+    const chunkSize = Math.min(maxLimit, Math.ceil(remainingAthletes / remainingChaves))
+    chaves[c] = participants.slice(athleteIndex, athleteIndex + chunkSize)
+    athleteIndex += chunkSize
   }
 
-  await Promise.all(matchPromises)
+  // Generate matches and assign participants
+  for (let c = 0; c < chaves.length; c++) {
+    const chaveNum = c + 1
+    const chaveAthletes = chaves[c]
+    const chaveName = `Chave ${chaveNum}`
+
+    // Update participants' notes to indicate their chave and reset placements
+    for (const p of chaveAthletes) {
+      await prisma.eventParticipant.update({
+        where: { id: p.id },
+        data: {
+          notes: chaveName,
+          placement: null,
+          medal: null,
+        },
+      })
+    }
+
+    const athleteIds = chaveAthletes.map((a) => a.studentId)
+    const chaveNotes = JSON.stringify({
+      chaveNumber: chaveNum,
+      chaveName,
+      athleteIds,
+      maxAthletes: maxLimit,
+      criterion,
+      placements: {},
+    })
+
+    if (chaveAthletes.length === 1) {
+      await prisma.bracketMatch.create({
+        data: {
+          categoryId,
+          round: chaveNum,
+          position: 1,
+          athlete1Id: chaveAthletes[0].studentId,
+          athlete2Id: null,
+          isBye: true,
+          winnerId: chaveAthletes[0].studentId,
+          notes: chaveNotes,
+        },
+      })
+    } else if (chaveAthletes.length === 2) {
+      await prisma.bracketMatch.create({
+        data: {
+          categoryId,
+          round: chaveNum,
+          position: 1,
+          athlete1Id: chaveAthletes[0].studentId,
+          athlete2Id: chaveAthletes[1].studentId,
+          isBye: false,
+          winnerId: null,
+          notes: chaveNotes,
+        },
+      })
+    } else {
+      let pos = 1
+      for (let i = 0; i < chaveAthletes.length; i++) {
+        for (let j = i + 1; j < chaveAthletes.length; j++) {
+          await prisma.bracketMatch.create({
+            data: {
+              categoryId,
+              round: chaveNum,
+              position: pos++,
+              athlete1Id: chaveAthletes[i].studentId,
+              athlete2Id: chaveAthletes[j].studentId,
+              isBye: false,
+              winnerId: null,
+              notes: chaveNotes,
+            },
+          })
+        }
+      }
+    }
+  }
+
   revalidatePath("/campeonatos")
+}
+
+export async function saveManualChaves(data: {
+  categoryId: string
+  chaves: Array<{
+    chaveNumber: number
+    chaveName?: string
+    athleteIds: string[]
+    placements?: {
+      firstId?: string | null
+      secondId?: string | null
+      thirdId?: string | null
+      fourthId?: string | null
+    }
+  }>
+}) {
+  const { categoryId, chaves } = data
+
+  await prisma.bracketMatch.deleteMany({ where: { categoryId } })
+
+  for (const ch of chaves) {
+    const chaveNum = ch.chaveNumber
+    const chaveName = ch.chaveName || `Chave ${chaveNum}`
+    const athleteIds = (ch.athleteIds || []).filter(Boolean)
+
+    // Update participants' chave in DB
+    for (const stId of athleteIds) {
+      await prisma.eventParticipant.updateMany({
+        where: { categoryId, studentId: stId },
+        data: { notes: chaveName },
+      })
+    }
+
+    // Update placements and medals if provided
+    if (ch.placements) {
+      for (const stId of athleteIds) {
+        await prisma.eventParticipant.updateMany({
+          where: { categoryId, studentId: stId },
+          data: { placement: null, medal: null },
+        })
+      }
+
+      if (ch.placements.firstId) {
+        await prisma.eventParticipant.updateMany({
+          where: { categoryId, studentId: ch.placements.firstId },
+          data: { placement: 1, medal: "OURO" },
+        })
+      }
+      if (ch.placements.secondId) {
+        await prisma.eventParticipant.updateMany({
+          where: { categoryId, studentId: ch.placements.secondId },
+          data: { placement: 2, medal: "PRATA" },
+        })
+      }
+      if (ch.placements.thirdId) {
+        await prisma.eventParticipant.updateMany({
+          where: { categoryId, studentId: ch.placements.thirdId },
+          data: { placement: 3, medal: "BRONZE" },
+        })
+      }
+      if (ch.placements.fourthId) {
+        await prisma.eventParticipant.updateMany({
+          where: { categoryId, studentId: ch.placements.fourthId },
+          data: { placement: 4, medal: null },
+        })
+      }
+    }
+
+    const chaveNotes = JSON.stringify({
+      chaveNumber: chaveNum,
+      chaveName,
+      athleteIds,
+      placements: ch.placements || {},
+    })
+
+    if (athleteIds.length === 0) continue
+
+    if (athleteIds.length === 1) {
+      await prisma.bracketMatch.create({
+        data: {
+          categoryId,
+          round: chaveNum,
+          position: 1,
+          athlete1Id: athleteIds[0],
+          athlete2Id: null,
+          isBye: true,
+          winnerId: athleteIds[0],
+          notes: chaveNotes,
+        },
+      })
+    } else if (athleteIds.length === 2) {
+      await prisma.bracketMatch.create({
+        data: {
+          categoryId,
+          round: chaveNum,
+          position: 1,
+          athlete1Id: athleteIds[0],
+          athlete2Id: athleteIds[1],
+          isBye: false,
+          winnerId: null,
+          notes: chaveNotes,
+        },
+      })
+    } else {
+      let pos = 1
+      for (let i = 0; i < athleteIds.length; i++) {
+        for (let j = i + 1; j < athleteIds.length; j++) {
+          await prisma.bracketMatch.create({
+            data: {
+              categoryId,
+              round: chaveNum,
+              position: pos++,
+              athlete1Id: athleteIds[i],
+              athlete2Id: athleteIds[j],
+              isBye: false,
+              winnerId: null,
+              notes: chaveNotes,
+            },
+          })
+        }
+      }
+    }
+  }
+
+  revalidatePath("/campeonatos")
+}
+
+export async function setChavePlacements(data: {
+  categoryId: string
+  chaveNumber: number
+  placements: {
+    firstId?: string | null
+    secondId?: string | null
+    thirdId?: string | null
+    fourthId?: string | null
+  }
+}) {
+  const { categoryId, chaveNumber, placements } = data
+
+  const matches = await prisma.bracketMatch.findMany({
+    where: { categoryId, round: chaveNumber },
+  })
+
+  const athleteIdsSet = new Set<string>()
+  for (const m of matches) {
+    if (m.athlete1Id) athleteIdsSet.add(m.athlete1Id)
+    if (m.athlete2Id) athleteIdsSet.add(m.athlete2Id)
+    try {
+      if (m.notes && m.notes.startsWith("{")) {
+        const p = JSON.parse(m.notes)
+        if (p.athleteIds) p.athleteIds.forEach((id: string) => athleteIdsSet.add(id))
+      }
+    } catch {}
+  }
+
+  // Clear existing placement/medal for athletes of this chave
+  for (const id of athleteIdsSet) {
+    await prisma.eventParticipant.updateMany({
+      where: { categoryId, studentId: id },
+      data: { placement: null, medal: null },
+    })
+  }
+
+  // Assign new placements
+  if (placements.firstId) {
+    await prisma.eventParticipant.updateMany({
+      where: { categoryId, studentId: placements.firstId },
+      data: { placement: 1, medal: "OURO" },
+    })
+  }
+  if (placements.secondId) {
+    await prisma.eventParticipant.updateMany({
+      where: { categoryId, studentId: placements.secondId },
+      data: { placement: 2, medal: "PRATA" },
+    })
+  }
+  if (placements.thirdId) {
+    await prisma.eventParticipant.updateMany({
+      where: { categoryId, studentId: placements.thirdId },
+      data: { placement: 3, medal: "BRONZE" },
+    })
+  }
+  if (placements.fourthId) {
+    await prisma.eventParticipant.updateMany({
+      where: { categoryId, studentId: placements.fourthId },
+      data: { placement: 4, medal: null },
+    })
+  }
+
+  // Update matches notes with placements
+  for (const m of matches) {
+    let currentData: any = {}
+    try {
+      if (m.notes && m.notes.startsWith("{")) currentData = JSON.parse(m.notes)
+    } catch {}
+    currentData.placements = placements
+    await prisma.bracketMatch.update({
+      where: { id: m.id },
+      data: { notes: JSON.stringify(currentData) },
+    })
+  }
+
+  revalidatePath("/campeonatos")
+}
+
+export async function generateBrackets(categoryId: string) {
+  return generateChaveBrackets({ categoryId, criterion: "PESO", maxPerChave: 3 })
 }
 
 export async function swapBracketAthletes(
@@ -720,25 +1175,42 @@ export async function updateBracketMatch(
 }
 
 export async function autoRankMeasurementCategory(categoryId: string) {
-  const participants = await prisma.eventParticipant.findMany({
-    where: {
-      categoryId,
-      metric: { not: null },
-    },
-    orderBy: { metric: "desc" },
+  const category = await prisma.category.findUnique({
+    where: { id: categoryId },
+    include: { modality: true },
   })
 
-  if (participants.length === 0) return
+  if (!category) return
+  const isTimeType = category.modality.type === "TEMPO"
 
-  // Assign ranks & medals considering ties (empates)
+  const allParticipants = await prisma.eventParticipant.findMany({
+    where: { categoryId },
+  })
+
+  const validParticipants = allParticipants.filter(
+    (p) => (p.metric !== null && p.metric !== undefined) || (p.score !== null && p.score !== undefined)
+  )
+
+  if (validParticipants.length === 0) return { count: 0 }
+
+  // Sort: Ascending for time, Descending for height, distance, score
+  validParticipants.sort((a, b) => {
+    const valA = a.metric ?? a.score ?? 0
+    const valB = b.metric ?? b.score ?? 0
+    return isTimeType ? valA - valB : valB - valA
+  })
+
   let currentRank = 1
-  for (let i = 0; i < participants.length; i++) {
-    const p = participants[i]
-    const prev = i > 0 ? participants[i - 1] : null
+  for (let i = 0; i < validParticipants.length; i++) {
+    const p = validParticipants[i]
+    const prev = i > 0 ? validParticipants[i - 1] : null
 
-    // Check tie with previous athlete
-    if (prev && prev.metric === p.metric) {
-      // Tie! Same rank & medal as previous
+    const valP = p.metric ?? p.score ?? 0
+    const valPrev = prev ? (prev.metric ?? prev.score ?? 0) : null
+
+    // Check tie
+    if (prev && valPrev === valP) {
+      // Same rank as prev
     } else if (i > 0) {
       currentRank = i + 1
     }
@@ -760,6 +1232,52 @@ export async function autoRankMeasurementCategory(categoryId: string) {
   revalidatePath("/campeonatos")
 }
 
+// ─── Ações em Massa para Alunos (Graduação em Conjunto / Troca de Faixa) ───
 
+export async function bulkUpdateBelt(studentIds: string[], newBelt: string) {
+  if (!studentIds || studentIds.length === 0) return { count: 0 }
+  await prisma.student.updateMany({
+    where: { id: { in: studentIds } },
+    data: { beltRank: newBelt },
+  })
+  revalidatePath("/alunos")
+  revalidatePath("/")
+  return { count: studentIds.length }
+}
 
+export async function bulkGraduateStudents(
+  studentIds: string[],
+  toBelt: string,
+  date: Date,
+  location: string = "",
+  notes: string = ""
+) {
+  if (!studentIds || studentIds.length === 0) return { count: 0 }
 
+  const students = await prisma.student.findMany({
+    where: { id: { in: studentIds } },
+    select: { id: true, beltRank: true, name: true },
+  })
+
+  for (const st of students) {
+    await prisma.graduationHistory.create({
+      data: {
+        studentId: st.id,
+        fromBelt: st.beltRank,
+        toBelt,
+        date: new Date(date),
+        location: location || "Dojang Principal",
+        notes: notes || `Graduação em conjunto - ${new Date(date).toLocaleDateString("pt-BR")}`,
+      },
+    })
+  }
+
+  await prisma.student.updateMany({
+    where: { id: { in: studentIds } },
+    data: { beltRank: toBelt },
+  })
+
+  revalidatePath("/alunos")
+  revalidatePath("/")
+  return { count: students.length }
+}
